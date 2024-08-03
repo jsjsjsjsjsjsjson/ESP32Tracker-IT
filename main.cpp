@@ -1,12 +1,11 @@
 #include <Arduino.h>
 #include <driver/i2s_std.h>
 #include <esp_spiffs.h>
+#include "SerialTerminal.h"
 #include "it_file.h"
 
 #define SMP_RATE 48000
 #define BUFF_SIZE 1024
-
-it_header_t it_header;
 
 i2s_chan_handle_t i2s_tx_handle;
 i2s_chan_config_t i2s_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
@@ -27,6 +26,68 @@ i2s_std_config_t i2s_std_cfg = {
     },
 };
 
+it_header_t it_header;
+pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
+uint16_t *maxChlTable;
+uint16_t *maxRowTable;
+
+void get_track(int argc, const char* argv[]) {
+    if (argc < 6) {
+        printf("%s <Pat> <ChlStart> <ChlEnd> <RowStart> <RowEnd>\n", argv[0]);
+        return;
+    }
+    uint16_t pat = strtol(argv[1], NULL, 0);
+    uint16_t chlstart = strtol(argv[2], NULL, 0);
+    uint16_t chlend = strtol(argv[3], NULL, 0);
+    uint16_t rowstart = strtol(argv[4], NULL, 0);
+    uint16_t rowend = strtol(argv[5], NULL, 0);
+    printf("ROWS |");
+    for (uint16_t i = chlstart; i < chlend; i++) {
+            printf("  Channel%2d         |", i);
+    }
+    printf("\n");
+    for (uint16_t row_index = rowstart; row_index < rowend; row_index++) {
+        printf("%3d: |", row_index);
+        for (uint16_t chl_index = chlstart; chl_index < chlend; chl_index++) {
+            printf("%3d %3d %3d %3d %3d |", unpack_data[pat][chl_index][row_index].note, 
+                                                unpack_data[pat][chl_index][row_index].instrument,
+                                                    unpack_data[pat][chl_index][row_index].volume,
+                                                        unpack_data[pat][chl_index][row_index].command,
+                                                            unpack_data[pat][chl_index][row_index].command_value);
+        }
+        printf("\n");
+    }
+}
+
+void get_free_heap_cmd(int argc, const char* argv[]) {
+    printf("Free heap size: %ld\n", esp_get_free_heap_size());
+}
+
+void mainTask(void *arg) {
+    SerialTerminal terminal;
+    terminal.begin(115200, "ESP32Tracker DEBUG");
+    terminal.addCommand("get_track", get_track);
+    terminal.addCommand("get_free_heap", get_free_heap_cmd);
+    FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
+    read_it_header(file, &it_header);
+    unpack_data = (pattern_note_t***)malloc(it_header.PatNum * sizeof(pattern_note_t**));
+    for (uint16_t ord = 0; ord < it_header.PatNum; ord++) {
+        unpack_data[ord] = (pattern_note_t**)malloc(MAX_CHANNELS * sizeof(pattern_note_t*));
+    }
+    maxChlTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
+    maxRowTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
+    for (uint16_t i = 0; i < it_header.PatNum; i++) {
+        printf("unpack ord %d\n", i);
+        read_and_unpack_pattern(file, &it_header, unpack_data[i], i, &maxChlTable[i], &maxRowTable[i]);
+    }
+    for (;;) {
+        terminal.update();
+        vTaskDelay(1);
+    }
+    //fclose(file);
+    vTaskDelete(NULL);
+}
+
 void setup() {
     esp_vfs_spiffs_conf_t spiffs_conf = {
         .base_path = "/spiffs",
@@ -42,7 +103,7 @@ void setup() {
     printf("I2S NEW CHAN %d\n", i2s_new_channel(&i2s_chan_cfg, &i2s_tx_handle, NULL));
     printf("I2S INIT CHAN %d\n", i2s_channel_init_std_mode(i2s_tx_handle, &i2s_std_cfg));
     printf("I2S ENABLE %d\n", i2s_channel_enable(i2s_tx_handle));
-    read_it_header("/spiffs/fod_absolutezerob.it", &it_header);
+    xTaskCreate(mainTask, "MAINTASK", 40960, NULL, 5, NULL);
 }
 
 void loop() {
