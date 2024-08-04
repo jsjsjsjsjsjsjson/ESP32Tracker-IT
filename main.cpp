@@ -29,6 +29,7 @@ i2s_std_config_t i2s_std_cfg = {
 };
 
 it_header_t it_header;
+it_head_flags_t it_head_flags;
 pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
@@ -66,6 +67,10 @@ void get_track(int argc, const char* argv[]) {
 void get_free_heap_cmd(int argc, const char* argv[]) {
     printf("Free heap size: %ld\n", esp_get_free_heap_size());
 }
+
+void reboot_cmd(int argc, const char* argv[]) {
+    esp_restart();
+}
 /*
 void get_heap_stat(int argc, const char* argv[]) {
     view_heap_status();
@@ -74,11 +79,12 @@ void get_heap_stat(int argc, const char* argv[]) {
 void mainTask(void *arg) {
     SerialTerminal terminal;
     terminal.begin(115200, "ESP32Tracker DEBUG");
+    terminal.addCommand("reboot", reboot_cmd);
     terminal.addCommand("get_track", get_track);
     terminal.addCommand("get_free_heap", get_free_heap_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
-    read_it_header(file, &it_header);
+    read_it_header(file, &it_header, &it_head_flags);
     unpack_data = (pattern_note_t***)malloc(it_header.PatNum * sizeof(pattern_note_t**));
     for (uint16_t pat = 0; pat < it_header.PatNum; pat++) {
         unpack_data[pat] = (pattern_note_t**)malloc(MAX_CHANNELS * sizeof(pattern_note_t*));

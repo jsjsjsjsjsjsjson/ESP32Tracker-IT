@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#define GET_BIT(num, n) ((num >> n) & 1)
+#define SET_BIT(num, n) (num | (1 << n))
+#define CLEAR_BIT(num, n) (num & ~(1 << n))
+
 uint16_t findMax(uint16_t arr[], uint16_t size) {
     if (size == 0) return INT16_MIN;
     uint16_t max = arr[0];

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include "extra_func.h"
 
 typedef struct __attribute__((packed)) {
     char IMPM[4];      // not include NULL
@@ -41,6 +42,8 @@ typedef struct __attribute__((packed)) {
     uint8_t Flg; // Flags
     uint8_t Vol; // Vol
     char SampleName[26]; // include NULL
+    uint8_t Cvt;
+    uint8_t DfP;
     uint32_t Length; // Sample Number
     uint32_t LoopBegin; // Sample Number
     uint32_t LoopEnd; // Sample Number
@@ -52,6 +55,7 @@ typedef struct __attribute__((packed)) {
     uint8_t ViD;
     uint8_t ViR;
     uint8_t ViT;
+    void *sample_data;
 } it_sample_t;
 
 #define MAX_CHANNELS 64
@@ -154,11 +158,22 @@ typedef struct {
 } it_head_flags_t;
 
 typedef struct {
+    bool sampWithHead;
+    bool use16Bit; // true = 16Bit Sample, false = 8Bit Sample
+    bool stereo;
+    bool comprsSamp;
+    bool useLoop;
+    bool useSusLoop;
+    bool pingPongLoop; // true = PingPongLoop, false = Forwards Loop
+    bool pingPongSusLoop; // true = PingPongLoop, false = Forwards Loop
+} it_sample_flags_t;
+
+typedef struct {
     bool enbSongMsg;
     bool embMidiConf;
 } it_special_t;
 
-void read_it_header(FILE *file, it_header_t *header) {
+void read_it_header(FILE *file, it_header_t *header, it_head_flags_t *flags) {
     // sizeof(it_header_t);
     if (!file) {
         perror("Read Error");
@@ -183,6 +198,24 @@ void read_it_header(FILE *file, it_header_t *header) {
     printf("CwtV: %u\n", header->CwtV);
     printf("Cmwt: %u\n", header->Cmwt);
     printf("Flags: %u\n", header->Flags);
+
+    flags->stereo = GET_BIT(header->Flags, 0);
+    flags->vol0MixOptz = GET_BIT(header->Flags, 1);
+    flags->useInst = GET_BIT(header->Flags, 2);
+    flags->lineSlid = GET_BIT(header->Flags, 3);
+    flags->oldEfct = GET_BIT(header->Flags, 4);
+    flags->LEGMWEF = GET_BIT(header->Flags, 5);
+    flags->useMidiPitchCtrl = GET_BIT(header->Flags, 6);
+    flags->ReqEmbMidiConf = GET_BIT(header->Flags, 7);
+    printf("  BIT0 STEREO: %d\n", flags->stereo);
+    printf("  BIT1 VOL0MIXOPTZ: %d\n", flags->vol0MixOptz);
+    printf("  BIT2 USEINST: %d\n", flags->useInst);
+    printf("  BIT3 LINESLID: %d\n", flags->lineSlid);
+    printf("  BIT4 OLDEFCT: %d\n", flags->oldEfct);
+    printf("  BIT5 LEGMWEF: %d\n", flags->LEGMWEF);
+    printf("  BIT6 USERMIDIPITCHCTRL: %d\n", flags->useMidiPitchCtrl);
+    printf("  BIT7 REQEMBMIDICONF: %d\n", flags->ReqEmbMidiConf);
+
     printf("Special: %u\n", header->Special);
     printf("GV: %u\n", header->GV);
     printf("MV: %u\n", header->MV);
@@ -260,8 +293,40 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     printf("free finish\n");
 }
 
-void read_it_sample() {
+void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
+    printf("Reading Sample Header in 0x%x\n", offset);
+    fseek(file, offset, SEEK_SET);
+    printf("File Jmp To 0x%x\n", ftell(file));
+    printf("Reading header...\n");
+    fread(sample, 80, 1, file);
+    printf("IMPS: %c%c%c%c\n", sample->IMPS[0], sample->IMPS[1], sample->IMPS[2], sample->IMPS[3]);
+    printf("DOSFilename: %.12s\n", sample->DOSFilename);
+    printf("Reserved: 0x%x\n", sample->Reserved);
+    printf("Gvl: 0x%x\n", sample->Gvl);
+    printf("Flg: 0x%x\n", sample->Flg);
 
+    
+
+    printf("Vol: 0x%x\n", sample->Vol);
+    printf("SampleName: %.26s\n", sample->SampleName);
+    printf("Cvt: 0x%x\n", sample->Cvt);
+    printf("DfP: 0x%x\n", sample->DfP);
+    printf("Length: 0x%x\n", sample->Length);
+    printf("LoopBegin: 0x%x\n", sample->LoopBegin);
+    printf("LoopEnd: 0x%x\n", sample->LoopEnd);
+    printf("C5Speed: 0x%x\n", sample->C5Speed);
+    printf("SusLoopBegin: 0x%x\n", sample->SusLoopBegin);
+    printf("SusLoopEnd: 0x%x\n", sample->SusLoopEnd);
+    printf("SamplePointer: 0x%x\n", sample->SamplePointer);
+    printf("ViS: 0x%x\n", sample->ViS);
+    printf("ViD: 0x%x\n", sample->ViD);
+    printf("ViR: 0x%x\n", sample->ViR);
+    printf("ViT: 0x%x\n", sample->ViT);
+    // printf("sample_data: 0x%p\n", sample->sample_data);
+    printf("Sample Data in 0x%x\n", sample->SamplePointer);
+    fseek(file, sample->SamplePointer, SEEK_SET);
+    printf("File Jmp To 0x%x\n", ftell(file));
+    
 }
 
 #endif // IT_FILE_H
