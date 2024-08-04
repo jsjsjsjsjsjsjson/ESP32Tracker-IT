@@ -1,8 +1,10 @@
 #include <Arduino.h>
 #include <driver/i2s_std.h>
 #include <esp_spiffs.h>
+// #include "debug_memory.h"
 #include "SerialTerminal.h"
 #include "it_file.h"
+#include "extra_func.h"
 
 #define SMP_RATE 48000
 #define BUFF_SIZE 1024
@@ -30,6 +32,8 @@ it_header_t it_header;
 pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
+
+uint16_t maxChannel = 0;
 
 void get_track(int argc, const char* argv[]) {
     if (argc < 6) {
@@ -62,23 +66,37 @@ void get_track(int argc, const char* argv[]) {
 void get_free_heap_cmd(int argc, const char* argv[]) {
     printf("Free heap size: %ld\n", esp_get_free_heap_size());
 }
-
+/*
+void get_heap_stat(int argc, const char* argv[]) {
+    view_heap_status();
+}
+*/
 void mainTask(void *arg) {
     SerialTerminal terminal;
     terminal.begin(115200, "ESP32Tracker DEBUG");
     terminal.addCommand("get_track", get_track);
     terminal.addCommand("get_free_heap", get_free_heap_cmd);
+    // terminal.addCommand("get_heap_stat", get_heap_stat);
     FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
     read_it_header(file, &it_header);
     unpack_data = (pattern_note_t***)malloc(it_header.PatNum * sizeof(pattern_note_t**));
-    for (uint16_t ord = 0; ord < it_header.PatNum; ord++) {
-        unpack_data[ord] = (pattern_note_t**)malloc(MAX_CHANNELS * sizeof(pattern_note_t*));
+    for (uint16_t pat = 0; pat < it_header.PatNum; pat++) {
+        unpack_data[pat] = (pattern_note_t**)malloc(MAX_CHANNELS * sizeof(pattern_note_t*));
     }
     maxChlTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
     maxRowTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
     for (uint16_t i = 0; i < it_header.PatNum; i++) {
-        printf("unpack ord %d\n", i);
-        read_and_unpack_pattern(file, &it_header, unpack_data[i], i, &maxChlTable[i], &maxRowTable[i]);
+        printf("unpack pat %d\n", i);
+        read_and_unpack_pattern(file, it_header.PatternOfst[i], unpack_data[i], &maxChlTable[i], &maxRowTable[i]);
+    }
+    maxChannel = findMax(maxChlTable, it_header.PatNum) + 1;
+    printf("This is a %d Channel IT\n", maxChannel);
+    printf("Freeing up memory on redundant channels...\n");
+    for (uint16_t pat = 0; pat < it_header.PatNum; pat++) {
+        for (uint16_t chl = maxChannel; chl < MAX_CHANNELS; chl++) {
+            free(unpack_data[pat][chl]);
+        }
+        printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
     }
     for (;;) {
         terminal.update();

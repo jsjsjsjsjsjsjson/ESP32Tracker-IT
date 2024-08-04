@@ -234,10 +234,10 @@ void read_it_header(FILE *file, it_header_t *header) {
     printf("\n");
 }
 
-void read_and_unpack_pattern(FILE *file, it_header_t *header, pattern_note_t **unpack_data, uint16_t PatNum, uint16_t *ChannelsOut, uint16_t *RowsOut) {
+void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpack_data, uint16_t *ChannelsOut, uint16_t *RowsOut) {
     it_packed_pattern_t pattern_data;
-    printf("Pat %d in 0x%x\n", PatNum, header->PatternOfst[PatNum]);
-    fseek(file, header->PatternOfst[PatNum], SEEK_SET);
+    printf("Reading Pattern in 0x%x\n", offset);
+    fseek(file, offset, SEEK_SET);
     printf("File Jmp To 0x%x\n", ftell(file));
     fread(&pattern_data, 2, 2, file);
     printf("Rows %d, Len %d\n", pattern_data.rows, pattern_data.length);
@@ -253,13 +253,15 @@ void read_and_unpack_pattern(FILE *file, it_header_t *header, pattern_note_t **u
     }
     printf("unpacking...\n");
     *ChannelsOut = unpack_pattern(&pattern_data, unpack_data);
-    printf("Pat %d Max Chan: %d\n", PatNum, *ChannelsOut);
+    printf("Pattern 0x%x Max Chan: %d\n", offset, *ChannelsOut);
     *RowsOut = pattern_data.rows;
     printf("free\n");
     free(pattern_data.packed_data);
     printf("free finish\n");
 }
 
-void read_it_sample()
+void read_it_sample() {
+
+}
 
 #endif // IT_FILE_H
