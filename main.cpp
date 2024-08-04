@@ -30,8 +30,6 @@ i2s_std_config_t i2s_std_cfg = {
 
 it_sample_t *it_samples;
 it_header_t it_header;
-it_head_flags_t it_head_flags;
-it_sample_flags_t *it_sample_flags;
 pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
@@ -85,8 +83,23 @@ void mainTask(void *arg) {
     terminal.addCommand("get_track", get_track);
     terminal.addCommand("get_free_heap", get_free_heap_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
+    // Open File
     FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
-    read_it_header(file, &it_header, &it_head_flags);
+
+    // Read Header
+    read_it_header(file, &it_header);
+
+    // Read Instrument
+    
+
+    // Read Samples
+    it_samples = (it_sample_t*)malloc(it_header.SmpNum * sizeof(it_sample_t));
+    for (uint16_t smp = 0; smp < it_header.SmpNum; smp++) {
+        printf("Reading Sample #%d...\n", smp);
+        read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp]);
+    }
+
+    // Read Pattern
     unpack_data = (pattern_note_t***)malloc(it_header.PatNum * sizeof(pattern_note_t**));
     for (uint16_t pat = 0; pat < it_header.PatNum; pat++) {
         unpack_data[pat] = (pattern_note_t**)malloc(MAX_CHANNELS * sizeof(pattern_note_t*));
@@ -106,12 +119,8 @@ void mainTask(void *arg) {
         }
         printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
     }
+    printf("%d\n", sizeof(it_instrument_t));
 
-    it_samples = (it_sample_t*)malloc(it_header.SmpNum * sizeof(it_sample_t));
-    it_sample_flags = (it_sample_flags_t*)malloc(it_header.SmpNum * sizeof(it_sample_flags_t));
-    for (uint16_t smp = 0; smp < it_header.SmpNum; smp++) {
-        read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp], it_sample_flags);
-    }
     for (;;) {
         terminal.update();
         vTaskDelay(1);

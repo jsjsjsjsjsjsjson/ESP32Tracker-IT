@@ -4,46 +4,183 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "extra_func.h"
+#include "audio_struct.h"
+
+typedef struct {
+    bool stereo : 1;
+    bool vol0MixOptz : 1;
+    bool useInst : 1;
+    bool lineSlid : 1;
+    bool oldEfct : 1;
+    bool LEGMWEF : 1; // Link Effect G's memory with Effect E/F.
+    bool useMidiPitchCtrl : 1;
+    bool ReqEmbMidiConf : 1;
+} it_head_flags_t;
+
+typedef struct {
+    bool sampWithHead : 1;
+    bool use16Bit : 1; // true = 16Bit Sample, false = 8Bit Sample
+    bool stereo : 1;
+    bool comprsSamp : 1;
+    bool useLoop : 1;
+    bool useSusLoop : 1;
+    bool pingPongLoop : 1; // true = PingPongLoop, false = Forwards Loop
+    bool pingPongSusLoop : 1; // true = PingPongLoop, false = Forwards Loop
+} it_sample_flags_t;
+
+typedef struct {
+    bool sampIsSigned : 1;
+    bool intelLoHiSamp : 1; // Off: Intel lo-hi byte order for 16-bit samples, true: Motorola hi-lo byte order for 16-bit samples
+    bool sampIsDPCM : 1;
+    bool sampIsPTM : 1;
+    bool smpIsTXWave12Bit : 1;
+    bool LRAPrompt : 1;
+    uint8_t Reserved : 2;
+} it_sample_convert_t;
+
+typedef struct {
+    bool enbSongMsg : 1;
+    uint8_t Recv0 : 2;
+    bool embMidiConf : 1;
+    uint8_t Recv1 : 4;
+} it_special_t;
 
 typedef struct __attribute__((packed)) {
     char IMPM[4];      // not include NULL
     char SongName[26]; // includes NULL
-    uint16_t PHiligt;
-    uint16_t OrdNum;
-    uint16_t InsNum;
-    uint16_t SmpNum;
-    uint16_t PatNum;
-    uint16_t CwtV;
-    uint16_t Cmwt;
-    uint16_t Flags;
-    uint16_t Special;
-    uint8_t GV;
-    uint8_t MV;
-    uint8_t IS;
-    uint8_t IT;
-    uint8_t Sep;
-    uint8_t PWD;
+    uint16_t PHiligt; // Pattern row hilight information.
+    uint16_t OrdNum; // Number of orders in song
+    uint16_t InsNum; // Number of instruments in song
+    uint16_t SmpNum; // Number of samples in song
+    uint16_t PatNum; // Number of patterns in song
+    uint16_t CwtV; // Created with tracker. Impulse Tracker y.xx = 0yxxh
+    uint16_t Cmwt; // Compatible with tracker with version greater than value.
+    it_head_flags_t Flags; // it_head_flags_t
+    it_special_t Special; // it_special_t
+    uint8_t GV; // Global volume. (0->128) All volumes are adjusted by this
+    uint8_t MV; // Mix volume (0->128) During mixing, this value controls the magnitude of the wave being mixed.
+    uint8_t IS; // Initial Speed of song.
+    uint8_t IT; // Initial Tempo of song
+    uint8_t Sep; // Panning separation between channels (0->128, 128 is max sep.)
+    uint8_t PWD; // Pitch wheel depth for MIDI controllers
     uint16_t MsgLgth;
     uint32_t MsgOfst;
     uint32_t Reserved;
-    uint8_t ChnlPan[64];
-    uint8_t ChnlVol[64];
+    uint8_t ChnlPan[64]; // Volume for each channel. Ranges from 0->64
+    uint8_t ChnlVol[64]; // ach byte contains a panning value for a channel.
     uint8_t *Orders;
     uint32_t *InstOfst;
     uint32_t *SampHeadOfst;
     uint32_t *PatternOfst;
 } it_header_t;
 
+typedef enum __attribute__((packed)) {
+    NNA_CUT,
+    NNA_CONTINUE,
+    NNA_NOTEOFF,
+    NNA_NOTEFADE
+} new_note_activ_t;
+
+typedef enum __attribute__((packed)) {
+    DCT_OFF,
+    DCT_NOTE,
+    DCT_SAMPLE,
+    DCT_INSTRUMENT
+} duplicat_check_type_t;
+
+typedef enum __attribute__((packed)) {
+    DCA_CUT,
+    DCA_NOTEOFF,
+    DCA_NOTEFADE
+} duplicat_check_activ_t;
+
+typedef struct {
+    bool EnvOn : 1;
+    bool LoopOn : 1;
+    bool SusLoopOn : 1;
+    uint8_t Recv : 4;
+    bool usePitchEnvAsFltr : 1;
+} it_inst_env_flags_t;
+
+// int8_t y point
+typedef struct __attribute__((packed)) {
+    int8_t y;
+    uint16_t tick;
+} it_inst_env_point_t;
+
+// uint8_t y point
+typedef struct __attribute__((packed)) {
+    uint8_t y;
+    uint16_t tick;
+} it_inst_env_upoint_t;
+
+typedef struct __attribute__((packed)) {
+    it_inst_env_flags_t Flg; // it_inst_env_flags_t
+    uint8_t Num; // Number of node points
+    uint8_t LpB; // Loop beginning
+    uint8_t LpE; // Loop end
+    uint8_t SLB; // Sustain loop beginning
+    uint8_t SLE; // Sustain loop end
+    it_inst_env_upoint_t envelope[25];
+} it_inst_uenvelope_t;
+
+typedef struct __attribute__((packed)) {
+    it_inst_env_flags_t Flg; // it_inst_env_flags_t
+    uint8_t Num; // Number of node points
+    uint8_t LpB; // Loop beginning
+    uint8_t LpE; // Loop end
+    uint8_t SLB; // Sustain loop beginning
+    uint8_t SLE; // Sustain loop end
+    it_inst_env_point_t envelope[25];
+} it_inst_envelope_t;
+
+typedef struct __attribute__((packed)) {
+    char IMPI[4];
+    char DOSFilename[12];
+    uint8_t Reserved0;
+    new_note_activ_t NNA;
+    duplicat_check_type_t DCT;
+    duplicat_check_activ_t DCA;
+    uint16_t FadeOut; // Ranges between 0 and 128, but the fadeout "Count" is 1024
+    int8_t PPS; // Pitch-Pan separation, range -32 -> +32
+    uint8_t PPC; // Pitch-Pan center: C-0 to B-9 represented as 0->119 inclusive
+    uint8_t GbV; // Global Volume, 0->128
+    uint8_t DfP; // Default Pan, 0->64, &128 => Don't use
+    uint8_t RV; // Random volume variation (percentage)
+    uint8_t RP; // Random panning variation (panning change - not implemented yet)
+    uint16_t TrkVers; // Tracker version
+    uint8_t NoS; // Number of samples associated with instrument. >InstFile only<
+    uint8_t Reserved1;
+    char InstName[26];
+    uint8_t IFC; // Initial Filter cutoff
+    uint8_t IFR; // Initial Filter resonance
+    uint8_t MCh; // MIDI Channel
+    uint8_t MPr; // MIDI Program (Instrument)
+    uint16_t MIDIBnk; // what is this??
+    uint8_t noteToSampTable[240];
+    it_inst_uenvelope_t volEnv;
+    it_inst_envelope_t panEnv;
+    it_inst_envelope_t pitEnv;
+    uint8_t wastedByte[7];
+} it_instrument_t;
+
+typedef enum __attribute__((packed)) {
+    WAVE_SINE,
+    WAVE_RAMPDOWN,
+    WAVE_SQUARE,
+    WAVE_RANDOM
+} vibrato_waveform_t;
+
 typedef struct __attribute__((packed)) {
     char IMPS[4]; // no include NULL
     char DOSFilename[12]; // no include NULL
     uint8_t Reserved;
     uint8_t Gvl; // Global Vol
-    uint8_t Flg; // Flags
+    it_sample_flags_t Flg; // Flags
     uint8_t Vol; // Vol
     char SampleName[26]; // include NULL
-    uint8_t Cvt;
-    uint8_t DfP;
+    it_sample_convert_t Cvt;
+    uint8_t DfP; // Default Pan. Bits 0->6 = Pan value, Bit 7 ON to USE (opposite of inst)
     uint32_t Length; // Sample Number
     uint32_t LoopBegin; // Sample Number
     uint32_t LoopEnd; // Sample Number
@@ -51,10 +188,10 @@ typedef struct __attribute__((packed)) {
     uint32_t SusLoopBegin;
     uint32_t SusLoopEnd;
     uint32_t SamplePointer;
-    uint8_t ViS;
-    uint8_t ViD;
-    uint8_t ViR;
-    uint8_t ViT;
+    uint8_t ViS; // Vibrato Speed, ranges from 0->64
+    uint8_t ViD; // Vibrato Depth, ranges from 0->64
+    vibrato_waveform_t ViR; // Vibrato waveform type.
+    uint8_t ViT; // Vibrato Rate, rate at which vibrato is applied (0->64)
     void *sample_data;
 } it_sample_t;
 
@@ -146,34 +283,7 @@ int unpack_pattern(it_packed_pattern_t *packed_pattern, pattern_note_t *unpack_d
     return max_channel_used; // Return the maximum channel number used.
 }
 
-typedef struct {
-    bool stereo;
-    bool vol0MixOptz;
-    bool useInst;
-    bool lineSlid;
-    bool oldEfct;
-    bool LEGMWEF; // Link Effect G's memory with Effect E/F.
-    bool useMidiPitchCtrl;
-    bool ReqEmbMidiConf;
-} it_head_flags_t;
-
-typedef struct {
-    bool sampWithHead;
-    bool use16Bit; // true = 16Bit Sample, false = 8Bit Sample
-    bool stereo;
-    bool comprsSamp;
-    bool useLoop;
-    bool useSusLoop;
-    bool pingPongLoop; // true = PingPongLoop, false = Forwards Loop
-    bool pingPongSusLoop; // true = PingPongLoop, false = Forwards Loop
-} it_sample_flags_t;
-
-typedef struct {
-    bool enbSongMsg;
-    bool embMidiConf;
-} it_special_t;
-
-void read_it_header(FILE *file, it_header_t *header, it_head_flags_t *flags) {
+void read_it_header(FILE *file, it_header_t *header) {
     // sizeof(it_header_t);
     if (!file) {
         perror("Read Error");
@@ -199,22 +309,14 @@ void read_it_header(FILE *file, it_header_t *header, it_head_flags_t *flags) {
     printf("Cmwt: %u\n", header->Cmwt);
     printf("Flags: %u\n", header->Flags);
 
-    flags->stereo = GET_BIT(header->Flags, 0);
-    flags->vol0MixOptz = GET_BIT(header->Flags, 1);
-    flags->useInst = GET_BIT(header->Flags, 2);
-    flags->lineSlid = GET_BIT(header->Flags, 3);
-    flags->oldEfct = GET_BIT(header->Flags, 4);
-    flags->LEGMWEF = GET_BIT(header->Flags, 5);
-    flags->useMidiPitchCtrl = GET_BIT(header->Flags, 6);
-    flags->ReqEmbMidiConf = GET_BIT(header->Flags, 7);
-    printf("  BIT0 STEREO: %d\n", flags->stereo);
-    printf("  BIT1 VOL0MIXOPTZ: %d\n", flags->vol0MixOptz);
-    printf("  BIT2 USEINST: %d\n", flags->useInst);
-    printf("  BIT3 LINESLID: %d\n", flags->lineSlid);
-    printf("  BIT4 OLDEFCT: %d\n", flags->oldEfct);
-    printf("  BIT5 LEGMWEF: %d\n", flags->LEGMWEF);
-    printf("  BIT6 USERMIDIPITCHCTRL: %d\n", flags->useMidiPitchCtrl);
-    printf("  BIT7 REQEMBMIDICONF: %d\n", flags->ReqEmbMidiConf);
+    printf("  BIT0 STEREO: %d\n", header->Flags.stereo);
+    printf("  BIT1 VOL0MIXOPTZ: %d\n", header->Flags.vol0MixOptz);
+    printf("  BIT2 USEINST: %d\n", header->Flags.useInst);
+    printf("  BIT3 LINESLID: %d\n", header->Flags.lineSlid);
+    printf("  BIT4 OLDEFCT: %d\n", header->Flags.oldEfct);
+    printf("  BIT5 LEGMWEF: %d\n", header->Flags.LEGMWEF);
+    printf("  BIT6 USERMIDIPITCHCTRL: %d\n", header->Flags.useMidiPitchCtrl);
+    printf("  BIT7 REQEMBMIDICONF: %d\n", header->Flags.ReqEmbMidiConf);
 
     printf("Special: %u\n", header->Special);
     printf("GV: %u\n", header->GV);
@@ -293,7 +395,9 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     printf("free finish\n");
 }
 
-void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample, it_sample_flags_t *flags) {
+// void read_it_inst(FILE *file, uint32_t offset)
+
+void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("Reading Sample Header in 0x%x\n", offset);
     fseek(file, offset, SEEK_SET);
     printf("File Jmp To 0x%x\n", ftell(file));
@@ -305,22 +409,14 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample, it_sample_
     printf("Gvl: 0x%x\n", sample->Gvl);
     printf("Flg: 0x%x\n", sample->Flg);
 
-    flags->sampWithHead = GET_BIT(sample->Flg, 0);
-    flags->use16Bit = GET_BIT(sample->Flg, 1);
-    flags->stereo = GET_BIT(sample->Flg, 2);
-    flags->comprsSamp = GET_BIT(sample->Flg, 3);
-    flags->useLoop = GET_BIT(sample->Flg, 4);
-    flags->useSusLoop = GET_BIT(sample->Flg, 5);
-    flags->pingPongLoop = GET_BIT(sample->Flg, 6);
-    flags->pingPongSusLoop = GET_BIT(sample->Flg, 7);
-    printf("  smpWithHead: %d\n", flags->sampWithHead);
-    printf("  use16Bit: %d\n", flags->use16Bit);
-    printf("  stereo: %d\n", flags->stereo);
-    printf("  comprsSamp: %d\n", flags->comprsSamp);
-    printf("  useLoop: %d\n", flags->useLoop);
-    printf("  useSusLoop: %d\n", flags->useSusLoop);
-    printf("  pingPongLoop: %d\n", flags->pingPongLoop);
-    printf("  pingPongSusLoop: %d\n", flags->pingPongSusLoop);
+    printf("  smpWithHead: %d\n", sample->Flg.sampWithHead);
+    printf("  use16Bit: %d\n", sample->Flg.use16Bit);
+    printf("  stereo: %d\n", sample->Flg.stereo);
+    printf("  comprsSamp: %d\n", sample->Flg.comprsSamp);
+    printf("  useLoop: %d\n", sample->Flg.useLoop);
+    printf("  useSusLoop: %d\n", sample->Flg.useSusLoop);
+    printf("  pingPongLoop: %d\n", sample->Flg.pingPongLoop);
+    printf("  pingPongSusLoop: %d\n", sample->Flg.pingPongSusLoop);
 
     printf("Vol: 0x%x\n", sample->Vol);
     printf("SampleName: %.26s\n", sample->SampleName);
@@ -337,11 +433,40 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample, it_sample_
     printf("ViD: 0x%x\n", sample->ViD);
     printf("ViR: 0x%x\n", sample->ViR);
     printf("ViT: 0x%x\n", sample->ViT);
+    if (sample->Length == 0) {
+        printf("This Sample is NULL, Skip!\n");
+        return;
+    }
     // printf("sample_data: 0x%p\n", sample->sample_data);
     printf("Sample Data in 0x%x\n", sample->SamplePointer);
     fseek(file, sample->SamplePointer, SEEK_SET);
     printf("File Jmp To 0x%x\n", ftell(file));
-    
+    uint32_t sampRelSizeByte;
+    if (sample->Flg.stereo) {
+        if (sample->Flg.use16Bit)
+            sampRelSizeByte = sample->Length * sizeof(audio_stereo_16_t);
+        else
+            sampRelSizeByte = sample->Length * sizeof(audio_stereo_8_t);
+    } else {
+        if (sample->Flg.use16Bit)
+            sampRelSizeByte = sample->Length * sizeof(audio_mono_16_t);
+        else
+            sampRelSizeByte = sample->Length * sizeof(audio_mono_8_t);
+    }
+    printf("Sample Rel Byte is %d\n", sampRelSizeByte);
+    printf("malloc mem\n");
+    sample->sample_data = malloc(sampRelSizeByte);
+    if (sample->sample_data == NULL) {
+        printf("malloc failed!!\n");
+        printf("Because: %s\n", strerror(errno));
+        printf("free heap size: %d\n", esp_get_free_heap_size());
+        for (;;) {
+            vTaskDelay(32);
+        }
+    }
+    printf("reading data...\n");
+    fread(sample->sample_data, sampRelSizeByte, 1, file);
+    printf("read finish!\n");
 }
 
 #endif // IT_FILE_H
