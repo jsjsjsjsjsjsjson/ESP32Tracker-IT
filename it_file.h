@@ -293,7 +293,7 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     printf("free finish\n");
 }
 
-void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
+void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample, it_sample_flags_t *flags) {
     printf("Reading Sample Header in 0x%x\n", offset);
     fseek(file, offset, SEEK_SET);
     printf("File Jmp To 0x%x\n", ftell(file));
@@ -305,7 +305,22 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("Gvl: 0x%x\n", sample->Gvl);
     printf("Flg: 0x%x\n", sample->Flg);
 
-    
+    flags->sampWithHead = GET_BIT(sample->Flg, 0);
+    flags->use16Bit = GET_BIT(sample->Flg, 1);
+    flags->stereo = GET_BIT(sample->Flg, 2);
+    flags->comprsSamp = GET_BIT(sample->Flg, 3);
+    flags->useLoop = GET_BIT(sample->Flg, 4);
+    flags->useSusLoop = GET_BIT(sample->Flg, 5);
+    flags->pingPongLoop = GET_BIT(sample->Flg, 6);
+    flags->pingPongSusLoop = GET_BIT(sample->Flg, 7);
+    printf("  smpWithHead: %d\n", flags->sampWithHead);
+    printf("  use16Bit: %d\n", flags->use16Bit);
+    printf("  stereo: %d\n", flags->stereo);
+    printf("  comprsSamp: %d\n", flags->comprsSamp);
+    printf("  useLoop: %d\n", flags->useLoop);
+    printf("  useSusLoop: %d\n", flags->useSusLoop);
+    printf("  pingPongLoop: %d\n", flags->pingPongLoop);
+    printf("  pingPongSusLoop: %d\n", flags->pingPongSusLoop);
 
     printf("Vol: 0x%x\n", sample->Vol);
     printf("SampleName: %.26s\n", sample->SampleName);

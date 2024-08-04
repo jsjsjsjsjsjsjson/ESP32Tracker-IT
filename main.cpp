@@ -28,8 +28,10 @@ i2s_std_config_t i2s_std_cfg = {
     },
 };
 
+it_sample_t *it_samples;
 it_header_t it_header;
 it_head_flags_t it_head_flags;
+it_sample_flags_t *it_sample_flags;
 pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
@@ -103,6 +105,12 @@ void mainTask(void *arg) {
             free(unpack_data[pat][chl]);
         }
         printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
+    }
+
+    it_samples = (it_sample_t*)malloc(it_header.SmpNum * sizeof(it_sample_t));
+    it_sample_flags = (it_sample_flags_t*)malloc(it_header.SmpNum * sizeof(it_sample_flags_t));
+    for (uint16_t smp = 0; smp < it_header.SmpNum; smp++) {
+        read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp], it_sample_flags);
     }
     for (;;) {
         terminal.update();
