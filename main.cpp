@@ -28,8 +28,9 @@ i2s_std_config_t i2s_std_cfg = {
     },
 };
 
-it_sample_t *it_samples;
 it_header_t it_header;
+it_instrument_t *it_instrument;
+it_sample_t *it_samples;
 pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
@@ -71,26 +72,49 @@ void get_free_heap_cmd(int argc, const char* argv[]) {
 void reboot_cmd(int argc, const char* argv[]) {
     esp_restart();
 }
+
 /*
 void get_heap_stat(int argc, const char* argv[]) {
     view_heap_status();
 }
 */
+
+void playTask(void *arg) {
+    for (;;) {
+        
+    }
+    vTaskDelete(NULL);
+}
+
+void start_play_cmd(int argc, const char* argv[]) {
+    printf("Starting PlayTask...\n");
+    xTaskCreate(playTask, "PLAYTASK", 4096, NULL, 6, NULL);
+}
+
 void mainTask(void *arg) {
     SerialTerminal terminal;
     terminal.begin(115200, "ESP32Tracker DEBUG");
     terminal.addCommand("reboot", reboot_cmd);
     terminal.addCommand("get_track", get_track);
     terminal.addCommand("get_free_heap", get_free_heap_cmd);
+    terminal.addCommand("start_play", start_play_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
     FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
 
     // Read Header
     read_it_header(file, &it_header);
+    while(!Serial.available()) {vTaskDelay(16);}
+    Serial.read();
 
     // Read Instrument
-    
+    it_instrument = (it_instrument_t*)malloc(it_header.InsNum * sizeof(it_instrument_t));
+    for (uint16_t inst = 0; inst < it_header.InsNum; inst++) {
+        printf("Reading Instrument #%d...\n", inst);
+        read_it_inst(file, it_header.InstOfst[inst], &it_instrument[inst]);
+    }
+    while(!Serial.available()) {vTaskDelay(16);}
+    Serial.read();
 
     // Read Samples
     it_samples = (it_sample_t*)malloc(it_header.SmpNum * sizeof(it_sample_t));
@@ -98,6 +122,8 @@ void mainTask(void *arg) {
         printf("Reading Sample #%d...\n", smp);
         read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp]);
     }
+    while(!Serial.available()) {vTaskDelay(16);}
+    Serial.read();
 
     // Read Pattern
     unpack_data = (pattern_note_t***)malloc(it_header.PatNum * sizeof(pattern_note_t**));
@@ -107,7 +133,7 @@ void mainTask(void *arg) {
     maxChlTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
     maxRowTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
     for (uint16_t i = 0; i < it_header.PatNum; i++) {
-        printf("unpack pat %d\n", i);
+        printf("Read and Unpack Pattern #%d...\n", i);
         read_and_unpack_pattern(file, it_header.PatternOfst[i], unpack_data[i], &maxChlTable[i], &maxRowTable[i]);
     }
     maxChannel = findMax(maxChlTable, it_header.PatNum) + 1;
@@ -120,10 +146,11 @@ void mainTask(void *arg) {
         printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
     }
     printf("%d\n", sizeof(it_instrument_t));
+    fclose(file);
 
     for (;;) {
         terminal.update();
-        vTaskDelay(1);
+        vTaskDelay(2);
     }
     //fclose(file);
     vTaskDelete(NULL);
@@ -144,7 +171,7 @@ void setup() {
     printf("I2S NEW CHAN %d\n", i2s_new_channel(&i2s_chan_cfg, &i2s_tx_handle, NULL));
     printf("I2S INIT CHAN %d\n", i2s_channel_init_std_mode(i2s_tx_handle, &i2s_std_cfg));
     printf("I2S ENABLE %d\n", i2s_channel_enable(i2s_tx_handle));
-    xTaskCreate(mainTask, "MAINTASK", 40960, NULL, 5, NULL);
+    xTaskCreate(mainTask, "MAINTASK", 40960, NULL, 4, NULL);
 }
 
 void loop() {

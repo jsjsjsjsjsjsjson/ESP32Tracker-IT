@@ -18,4 +18,11 @@ uint16_t findMax(uint16_t arr[], uint16_t size) {
     return max;
 }
 
+void cover_c5speed(uint32_t C5_Speed, float midi_frequencies[128]) {
+    float A4_frequency = C5_Speed * powf(2.0f, -9.0f / 12.0f);
+    for (uint8_t i = 0; i < 128; i++) {
+        midi_frequencies[i] = A4_frequency * powf(2.0f, (i - 69) / 12.0f);
+    }
+}
+
 #endif

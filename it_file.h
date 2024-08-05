@@ -135,6 +135,11 @@ typedef struct __attribute__((packed)) {
 } it_inst_envelope_t;
 
 typedef struct __attribute__((packed)) {
+    uint8_t note;
+    uint8_t sample;
+} note_to_samp_table_t;
+
+typedef struct __attribute__((packed)) {
     char IMPI[4];
     char DOSFilename[12];
     uint8_t Reserved0;
@@ -157,7 +162,7 @@ typedef struct __attribute__((packed)) {
     uint8_t MCh; // MIDI Channel
     uint8_t MPr; // MIDI Program (Instrument)
     uint16_t MIDIBnk; // what is this??
-    uint8_t noteToSampTable[240];
+    note_to_samp_table_t noteToSampTable[120];
     it_inst_uenvelope_t volEnv;
     it_inst_envelope_t panEnv;
     it_inst_envelope_t pitEnv;
@@ -192,6 +197,7 @@ typedef struct __attribute__((packed)) {
     uint8_t ViD; // Vibrato Depth, ranges from 0->64
     vibrato_waveform_t ViR; // Vibrato waveform type.
     uint8_t ViT; // Vibrato Rate, rate at which vibrato is applied (0->64)
+    float speedTable[128];
     void *sample_data;
 } it_sample_t;
 
@@ -395,7 +401,38 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     printf("free finish\n");
 }
 
-// void read_it_inst(FILE *file, uint32_t offset)
+void read_it_inst(FILE *file, uint32_t offset, it_instrument_t *inst) {
+    printf("Reading Instrument in 0x%x\n", offset);
+    fseek(file, offset, SEEK_SET);
+    printf("File Jmp To 0x%x\n", ftell(file));
+    printf("Reading data...\n");
+    fread(inst, sizeof(it_instrument_t), 1, file);
+    printf("IMPI: %.4s\n", inst->IMPI);
+    printf("DOSFilename: %.12s\n", inst->DOSFilename);
+    printf("Instrument Name: %s\n", inst->InstName);
+    printf("noteToSampTable: ");
+    for (uint8_t i = 0; i < 120; i++) {
+        printf("%d ", inst->noteToSampTable[i].sample);
+    }
+    printf("\n");
+
+    /*
+    printf("Vol Env:\n");
+    for (uint8_t i = 0; i < 25; i++) {
+        printf("%4d -> %2d\n", inst->volEnv.envelope[i].tick, inst->volEnv.envelope[i].y);
+    }
+
+    printf("Pan Env:\n");
+    for (uint8_t i = 0; i < 25; i++) {
+        printf("%4d -> %2d\n", inst->panEnv.envelope[i].tick, inst->panEnv.envelope[i].y);
+    }
+
+    printf("Pitch Env:\n");
+    for (uint8_t i = 0; i < 25; i++) {
+        printf("%4d -> %2d\n", inst->pitEnv.envelope[i].tick, inst->pitEnv.envelope[i].y);
+    }
+    */
+}
 
 void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("Reading Sample Header in 0x%x\n", offset);
@@ -403,7 +440,7 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("File Jmp To 0x%x\n", ftell(file));
     printf("Reading header...\n");
     fread(sample, 80, 1, file);
-    printf("IMPS: %c%c%c%c\n", sample->IMPS[0], sample->IMPS[1], sample->IMPS[2], sample->IMPS[3]);
+    printf("IMPS: %.4s\n", sample->IMPS);
     printf("DOSFilename: %.12s\n", sample->DOSFilename);
     printf("Reserved: 0x%x\n", sample->Reserved);
     printf("Gvl: 0x%x\n", sample->Gvl);
@@ -422,12 +459,12 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("SampleName: %.26s\n", sample->SampleName);
     printf("Cvt: 0x%x\n", sample->Cvt);
     printf("DfP: 0x%x\n", sample->DfP);
-    printf("Length: 0x%x\n", sample->Length);
-    printf("LoopBegin: 0x%x\n", sample->LoopBegin);
-    printf("LoopEnd: 0x%x\n", sample->LoopEnd);
-    printf("C5Speed: 0x%x\n", sample->C5Speed);
-    printf("SusLoopBegin: 0x%x\n", sample->SusLoopBegin);
-    printf("SusLoopEnd: 0x%x\n", sample->SusLoopEnd);
+    printf("Length: %d\n", sample->Length);
+    printf("LoopBegin: %d\n", sample->LoopBegin);
+    printf("LoopEnd: %d\n", sample->LoopEnd);
+    printf("C5Speed: %d\n", sample->C5Speed);
+    printf("SusLoopBegin: %d\n", sample->SusLoopBegin);
+    printf("SusLoopEnd: %d\n", sample->SusLoopEnd);
     printf("SamplePointer: 0x%x\n", sample->SamplePointer);
     printf("ViS: 0x%x\n", sample->ViS);
     printf("ViD: 0x%x\n", sample->ViD);
@@ -467,6 +504,10 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("reading data...\n");
     fread(sample->sample_data, sampRelSizeByte, 1, file);
     printf("read finish!\n");
+    printf("Generate frequency tables...\n");
+    printf("C5->A4 = %f\n", sample->C5Speed * powf(2.0f, -9.0f / 12.0f));
+    cover_c5speed(sample->C5Speed, sample->speedTable);
+    printf("Generate Success\n");
 }
 
 #endif // IT_FILE_H
