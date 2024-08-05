@@ -23,6 +23,11 @@ typedef struct {
     uint8_t r;
 } audio_stereo_u8_t;
 
+typedef struct {
+    int32_t l;
+    int32_t r;
+} audio_stereo_32_t;
+
 typedef int16_t audio_mono_16_t;
 typedef int8_t audio_mono_8_t;
 typedef uint16_t audio_mono_u16_t;

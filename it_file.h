@@ -15,6 +15,7 @@ typedef struct {
     bool LEGMWEF : 1; // Link Effect G's memory with Effect E/F.
     bool useMidiPitchCtrl : 1;
     bool ReqEmbMidiConf : 1;
+    uint8_t Recv;
 } it_head_flags_t;
 
 typedef struct {
@@ -43,6 +44,7 @@ typedef struct {
     uint8_t Recv0 : 2;
     bool embMidiConf : 1;
     uint8_t Recv1 : 4;
+    uint8_t Recv2;
 } it_special_t;
 
 typedef struct __attribute__((packed)) {
@@ -189,7 +191,7 @@ typedef struct __attribute__((packed)) {
     uint32_t Length; // Sample Number
     uint32_t LoopBegin; // Sample Number
     uint32_t LoopEnd; // Sample Number
-    uint32_t C5Speed; // Bytes
+    uint32_t C5Speed; // Sample Rate
     uint32_t SusLoopBegin;
     uint32_t SusLoopEnd;
     uint32_t SamplePointer;
@@ -506,7 +508,7 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("read finish!\n");
     printf("Generate frequency tables...\n");
     printf("C5->A4 = %f\n", sample->C5Speed * powf(2.0f, -9.0f / 12.0f));
-    cover_c5speed(sample->C5Speed, sample->speedTable);
+    convert_c5speed(sample->C5Speed, sample->speedTable);
     printf("Generate Success\n");
 }
 

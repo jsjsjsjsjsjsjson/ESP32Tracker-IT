@@ -7,7 +7,9 @@
 #include "extra_func.h"
 
 #define SMP_RATE 48000
-#define BUFF_SIZE 1024
+#define BUFF_SIZE 2048
+
+audio_stereo_16_t audioBuffer[BUFF_SIZE];
 
 i2s_chan_handle_t i2s_tx_handle;
 i2s_chan_config_t i2s_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
@@ -79,16 +81,181 @@ void get_heap_stat(int argc, const char* argv[]) {
 }
 */
 
+typedef enum __attribute__((packed)) {
+    NOTE_OFF,
+    NOTE_ON
+} note_stat_t;
+
+note_stat_t note_stat[MAX_CHANNELS];
+uint8_t note_vol[MAX_CHANNELS];
+float frac_index[MAX_CHANNELS];
+uint32_t int_index[MAX_CHANNELS];
+
+audio_stereo_16_t make_sound(float freq, uint8_t vol, uint8_t chl, uint16_t smp_num) {
+    // Update indices
+    audio_stereo_16_t result = {0, 0};
+    if (note_stat[chl] == NOTE_OFF || vol == 0 || it_samples[smp_num].sample_data == NULL) return result;
+    // printf("INPUT: FREQ=%f VOL=%d CHL=%d SMP_NUM=%d\n", freq, vol, chl, smp_num);
+    float increment = freq / SMP_RATE;
+    frac_index[chl] += increment;
+    if (frac_index[chl] >= 1.0) {
+        int_index[chl] += (int)frac_index[chl]; // Increment the integer index by the whole part of frac_index
+        frac_index[chl] -= (int)frac_index[chl]; // Keep only the fractional part
+    }
+
+    // Handle looping or stopping at sample end
+    if (it_samples[smp_num].Flg.useLoop || it_samples[smp_num].Flg.pingPongLoop) {
+        while (int_index[chl] >= it_samples[smp_num].LoopEnd) {
+            int_index[chl] = it_samples[smp_num].LoopBegin;
+        }
+    } else if (int_index[chl] >= it_samples[smp_num].Length) {
+        note_stat[chl] = NOTE_OFF;
+        int_index[chl] = 0;
+        frac_index[chl] = 0;
+        note_vol[chl] = 0;
+        return result;
+    }
+
+    uint32_t idx = int_index[chl];
+    float frac = frac_index[chl];
+    if (it_samples[smp_num].Flg.use16Bit) {
+        if (it_samples[smp_num].Flg.stereo)
+            result = ((audio_stereo_16_t*)(it_samples[smp_num].sample_data))[idx];
+        else
+            result = {((audio_mono_16_t*)(it_samples[smp_num].sample_data))[idx],
+                        ((audio_mono_16_t*)(it_samples[smp_num].sample_data))[idx]};
+    } else {
+        if (it_samples[smp_num].Flg.stereo)
+            result = {(int16_t)(((audio_stereo_8_t*)(it_samples[smp_num].sample_data))[idx].l << 8),
+                        (int16_t)(((audio_stereo_8_t*)(it_samples[smp_num].sample_data))[idx].r << 8)};
+        else
+            result = {(int16_t)(((audio_mono_8_t*)(it_samples[smp_num].sample_data))[idx] << 8),
+                        (int16_t)(((audio_mono_8_t*)(it_samples[smp_num].sample_data))[idx] << 8)};
+    }
+    return result;
+}
+
+void pause_serial() {
+    while(!Serial.available()) {vTaskDelay(16);}
+    Serial.read();
+}
+
 void playTask(void *arg) {
+    size_t writed;
+    printf("Initialisation....\n");
+    uint16_t TempoTickMax = TEMPO_TO_TICKS(it_header.IT, SMP_RATE);
+    printf("TempoTickMax: %d\n", TempoTickMax);
+    uint8_t TicksRow = it_header.IS;
+    printf("TicksRow: %d\n", TicksRow);
+    uint16_t bufferIndex = 0;
+    int16_t tracker_rows = 0;
+    int16_t tracker_ords = 0;
+    uint8_t tracker_pats = it_header.Orders[tracker_ords];
+    uint32_t tempo_tick = 0;
+    uint32_t tick = 0;
+    uint8_t now_note[MAX_CHANNELS];
+    float now_freq[MAX_CHANNELS];
+    uint8_t now_vol[MAX_CHANNELS];
+    uint8_t now_samp[MAX_CHANNELS];
+    uint8_t now_inst[MAX_CHANNELS];
+    uint8_t now_efct0[MAX_CHANNELS];
+    uint8_t now_efct1[MAX_CHANNELS];
+    memset(now_note, 0, sizeof(now_note));
+    memset(now_vol, 0, sizeof(now_vol));
+    memset(now_freq, 0, sizeof(now_freq));
+    memset(now_vol, 0, sizeof(now_vol));
+    memset(now_samp, 0, sizeof(now_samp));
+    memset(now_inst, 0, sizeof(now_inst));
+    printf("Readly...\n");
+    // pause_serial();
     for (;;) {
-        
+        audio_stereo_32_t tmp = {0, 0};
+        for (uint16_t chl = 0; chl < maxChannel; chl++) {
+            audio_stereo_16_t tmp16;
+            tmp16 = make_sound(now_freq[chl], now_vol[chl], chl, now_samp[chl]);
+            tmp.l += tmp16.l;
+            tmp.r += tmp16.r;
+        }
+        audioBuffer[bufferIndex].l = tmp.l / maxChannel;
+        audioBuffer[bufferIndex].r = tmp.r / maxChannel;
+        bufferIndex++;
+        tempo_tick++;
+
+        if (bufferIndex > BUFF_SIZE) {
+            bufferIndex = 0;
+            i2s_channel_write(i2s_tx_handle, audioBuffer, sizeof(audioBuffer), &writed, portMAX_DELAY);
+            vTaskDelay(1);
+        }
+
+        if (tempo_tick >= TempoTickMax) {
+            tempo_tick = 0;
+            tick++;
+            if (tick >= TicksRow) {
+                tick = 0;
+                for (uint16_t chl = 0; chl < maxChannel; chl++) {
+                    uint8_t inst_tmp = unpack_data[tracker_pats][chl][tracker_rows].instrument;
+                    uint8_t note_tmp = unpack_data[tracker_pats][chl][tracker_rows].note;
+                    now_efct0[chl] = unpack_data[tracker_pats][chl][tracker_rows].command;
+                    now_efct1[chl] = unpack_data[tracker_pats][chl][tracker_rows].command_value;
+
+                    uint8_t vol_tmp = unpack_data[tracker_pats][chl][tracker_rows].volume;
+                    if (vol_tmp)
+                        now_vol[chl] = vol_tmp;
+
+                    if (inst_tmp) {
+                        now_inst[chl] = inst_tmp - 1;
+                        now_samp[chl] = it_instrument[now_inst[chl]].noteToSampTable[now_note[chl]].sample - 1;
+                        // printf("now_samp[%d] = %d\n", chl, it_instrument[now_inst[chl]].noteToSampTable[now_note[chl]].sample - 1);
+                    }
+
+                    if (note_tmp) {
+                        now_note[chl] = note_tmp;
+                        note_stat[chl] = NOTE_ON;
+                        int_index[chl] = 0;
+                        frac_index[chl] = 0;
+                        now_freq[chl] = it_samples[now_samp[chl]].speedTable[note_tmp] / 2;
+                    }
+                }
+                printf("%2d %3d: ", tracker_pats, tracker_rows);
+                for (uint8_t i = 0; i < 8; i++) {
+                    printf("%3d %2d %2d |", now_note[i], now_inst[i], now_samp[i]);
+                }
+                printf("\n");
+                tracker_rows++;
+                if (tracker_rows >= maxRowTable[tracker_pats]) {
+                    tracker_rows = 0;
+                    tracker_ords++;
+                    if (tracker_ords >= it_header.OrdNum)
+                        tracker_ords = 0;
+                    tracker_pats = it_header.Orders[tracker_ords];
+                    printf("skip to %d -> %d\n", tracker_ords, tracker_pats);
+                }
+            }
+        }
     }
     vTaskDelete(NULL);
 }
 
 void start_play_cmd(int argc, const char* argv[]) {
     printf("Starting PlayTask...\n");
-    xTaskCreate(playTask, "PLAYTASK", 4096, NULL, 6, NULL);
+    xTaskCreate(playTask, "PLAYTASK", 10240, NULL, 6, NULL);
+}
+
+void get_c5_speed_cmd(int argc, const char* argv[]) {
+    if (argc < 2) {printf("get_c5_speed <smp_num>\n"); return;}
+    uint16_t num = strtol(argv[1], NULL, 0);
+    printf("SMP #%d %s C5Speed: %dHz\n", num, it_samples[num].SampleName, it_samples[num].C5Speed);
+}
+
+void get_speed_table_cmd(int argc, const char* argv[]) {
+    if (argc < 2) {printf("get_speed_table <smp_num>\n"); return;}
+    uint16_t num = strtol(argv[1], NULL, 0);
+    printf("SMP #%d %s C5Speed: %dHz\n", num, it_samples[num].SampleName, it_samples[num].C5Speed);
+    printf("NOTE | FREQ\n");
+    for (uint8_t i = 0; i < 128; i++) {
+        printf("%4d | %f\n", i, it_samples[num].speedTable[i]);
+        pause_serial();
+    }
 }
 
 void mainTask(void *arg) {
@@ -98,14 +265,15 @@ void mainTask(void *arg) {
     terminal.addCommand("get_track", get_track);
     terminal.addCommand("get_free_heap", get_free_heap_cmd);
     terminal.addCommand("start_play", start_play_cmd);
+    terminal.addCommand("get_c5_speed", get_c5_speed_cmd);
+    terminal.addCommand("get_speed_table", get_speed_table_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
     FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
 
     // Read Header
     read_it_header(file, &it_header);
-    while(!Serial.available()) {vTaskDelay(16);}
-    Serial.read();
+    pause_serial();
 
     // Read Instrument
     it_instrument = (it_instrument_t*)malloc(it_header.InsNum * sizeof(it_instrument_t));
@@ -113,8 +281,6 @@ void mainTask(void *arg) {
         printf("Reading Instrument #%d...\n", inst);
         read_it_inst(file, it_header.InstOfst[inst], &it_instrument[inst]);
     }
-    while(!Serial.available()) {vTaskDelay(16);}
-    Serial.read();
 
     // Read Samples
     it_samples = (it_sample_t*)malloc(it_header.SmpNum * sizeof(it_sample_t));
@@ -122,8 +288,6 @@ void mainTask(void *arg) {
         printf("Reading Sample #%d...\n", smp);
         read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp]);
     }
-    while(!Serial.available()) {vTaskDelay(16);}
-    Serial.read();
 
     // Read Pattern
     unpack_data = (pattern_note_t***)malloc(it_header.PatNum * sizeof(pattern_note_t**));
