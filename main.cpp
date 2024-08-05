@@ -123,19 +123,21 @@ audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t chl, uint16_t s
     float frac = frac_index[chl] / (float)(1 << 16);
 
     if (it_samples[smp_num].Flg.use16Bit) {
-        if (it_samples[smp_num].Flg.stereo)
-            result = (audio_stereo_16_t){(int16_t)(((audio_stereo_16_t*)(it_samples[smp_num].sample_data))[idx].l),
-                                         (int16_t)(((audio_stereo_16_t*)(it_samples[smp_num].sample_data))[idx].r)};
-        else
-            result = (audio_stereo_16_t){((audio_mono_16_t*)(it_samples[smp_num].sample_data))[idx],
-                                         ((audio_mono_16_t*)(it_samples[smp_num].sample_data))[idx]};
+        if (it_samples[smp_num].Flg.stereo) {
+            audio_stereo_16_t* dataTmp = (audio_stereo_16_t*)it_samples[smp_num].sample_data;
+            result = dataTmp[idx];
+        } else {
+            audio_mono_16_t* dataTmp = (audio_mono_16_t*)it_samples[smp_num].sample_data;
+            result = (audio_stereo_16_t){dataTmp[idx], dataTmp[idx]};
+        }
     } else {
-        if (it_samples[smp_num].Flg.stereo)
-            result = (audio_stereo_16_t){(int16_t)(((audio_stereo_8_t*)(it_samples[smp_num].sample_data))[idx].l << 7),
-                                         (int16_t)(((audio_stereo_8_t*)(it_samples[smp_num].sample_data))[idx].r << 7)};
-        else
-            result = (audio_stereo_16_t){(int16_t)(((audio_mono_8_t*)(it_samples[smp_num].sample_data))[idx] << 7),
-                                         (int16_t)(((audio_mono_8_t*)(it_samples[smp_num].sample_data))[idx] << 7)};
+        if (it_samples[smp_num].Flg.stereo) {
+            audio_stereo_8_t* dataTmp = (audio_stereo_8_t*)it_samples[smp_num].sample_data;
+            result = (audio_stereo_16_t){dataTmp[idx].l << 8, dataTmp[idx].r << 8};
+        } else {
+            audio_mono_8_t* dataTmp = (audio_mono_8_t*)it_samples[smp_num].sample_data;
+            result = (audio_stereo_16_t){dataTmp[idx] << 8, dataTmp[idx] << 8};
+        }
     }
 
     result.l *= vol_table[vol];
