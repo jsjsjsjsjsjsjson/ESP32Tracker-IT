@@ -22,11 +22,11 @@ uint16_t findMax(uint16_t arr[], uint16_t size) {
     return max;
 }
 
-void convert_c5speed(uint32_t C5_Speed, float midi_frequencies[128]) {
+void convert_c5speed(uint32_t C5_Speed, uint32_t midi_frequencies[128]) {
     float semitone_ratio = powf(2.0f, 1.0f / 12.0f);
     float A4_frequency = C5_Speed / powf(semitone_ratio, -9);
     for (int i = 0; i < 128; ++i) {
-        midi_frequencies[i] = A4_frequency * powf(semitone_ratio, i - 69);
+        midi_frequencies[i] = roundf(A4_frequency * powf(semitone_ratio, i - 69));
     }
 }
 
