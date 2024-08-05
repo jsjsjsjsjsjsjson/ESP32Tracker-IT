@@ -92,56 +92,53 @@ typedef enum __attribute__((packed)) {
 
 note_stat_t note_stat[MAX_CHANNELS];
 uint8_t note_vol[MAX_CHANNELS];
-int32_t frac_index[MAX_CHANNELS];
+uint64_t frac_index[MAX_CHANNELS];
 uint32_t int_index[MAX_CHANNELS];
 
-audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t chl, uint16_t smp_num) {
+// 这个make_sound实现非常非常慢，希望好心人能优化一下
+inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t chl, uint16_t smp_num) {
     audio_stereo_16_t result = {0, 0};
-    if (note_stat[chl] == NOTE_OFF || vol == 0 || it_samples[smp_num].sample_data == NULL) return result;
-
-    int32_t increment = (int32_t)(freq / SMP_RATE * (1 << 16));
+    if (note_stat[chl] == NOTE_OFF || vol == 0 || it_samples[smp_num].sample_data == NULL) 
+        return result;
+    it_sample_t *sample = &it_samples[smp_num];
+    uint64_t increment = (freq << 16) / SMP_RATE;
     frac_index[chl] += increment;
+    int_index[chl] += frac_index[chl] >> 16;
+    frac_index[chl] &= 0xFFFF;
 
-    if (frac_index[chl] >= (1 << 16)) {
-        int_index[chl] += (frac_index[chl] >> 16); // Increment the integer index by the whole part of frac_index
-        frac_index[chl] &= 0xFFFF; // Keep only the fractional part
-    }
-
-    if (it_samples[smp_num].Flg.useLoop || it_samples[smp_num].Flg.pingPongLoop) {
-        while (int_index[chl] >= it_samples[smp_num].LoopEnd) {
-            int_index[chl] = it_samples[smp_num].LoopBegin;
+    if (sample->Flg.useLoop || sample->Flg.pingPongLoop) {
+        if (int_index[chl] >= sample->LoopEnd) {
+            int_index[chl] = sample->LoopBegin;
         }
-    } else if (int_index[chl] >= it_samples[smp_num].Length) {
+    } else if (int_index[chl] >= sample->Length) {
         note_stat[chl] = NOTE_OFF;
-        int_index[chl] = 0;
-        frac_index[chl] = 0;
-        note_vol[chl] = 0;
+        int_index[chl] = frac_index[chl] = note_vol[chl] = 0;
         return result;
     }
 
     uint32_t idx = int_index[chl];
-    float frac = frac_index[chl] / (float)(1 << 16);
 
-    if (it_samples[smp_num].Flg.use16Bit) {
-        if (it_samples[smp_num].Flg.stereo) {
-            audio_stereo_16_t* dataTmp = (audio_stereo_16_t*)it_samples[smp_num].sample_data;
+    if (sample->Flg.use16Bit) {
+        if (sample->Flg.stereo) {
+            audio_stereo_16_t *dataTmp = (audio_stereo_16_t *)sample->sample_data;
             result = dataTmp[idx];
         } else {
-            audio_mono_16_t* dataTmp = (audio_mono_16_t*)it_samples[smp_num].sample_data;
+            audio_mono_16_t *dataTmp = (audio_mono_16_t *)sample->sample_data;
             result = (audio_stereo_16_t){dataTmp[idx], dataTmp[idx]};
         }
     } else {
-        if (it_samples[smp_num].Flg.stereo) {
-            audio_stereo_8_t* dataTmp = (audio_stereo_8_t*)it_samples[smp_num].sample_data;
-            result = (audio_stereo_16_t){dataTmp[idx].l << 8, dataTmp[idx].r << 8};
+        if (sample->Flg.stereo) {
+            audio_stereo_8_t *dataTmp = (audio_stereo_8_t *)sample->sample_data;
+            result = (audio_stereo_16_t){(int16_t)(dataTmp[idx].l << 8), (int16_t)(dataTmp[idx].r << 8)};
         } else {
-            audio_mono_8_t* dataTmp = (audio_mono_8_t*)it_samples[smp_num].sample_data;
-            result = (audio_stereo_16_t){dataTmp[idx] << 8, dataTmp[idx] << 8};
+            audio_mono_8_t *dataTmp = (audio_mono_8_t *)sample->sample_data;
+            result = (audio_stereo_16_t){(int16_t)(dataTmp[idx] << 8), (int16_t)(dataTmp[idx] << 8)};
         }
     }
 
-    result.l *= vol_table[vol];
-    result.r *= vol_table[vol];
+    float vol_factor = vol_table[vol];
+    result.l *= vol_factor;
+    result.r *= vol_factor;
     return result;
 }
 
@@ -155,11 +152,16 @@ void play_samp_cmd(int argc, const char* argv[]) {
     uint16_t smp_num = strtol(argv[1], NULL, 0);
     uint16_t note = strtol(argv[2], NULL, 0);
     uint32_t time = strtol(argv[3], NULL, 0) * SMP_RATE;
-    printf("Playing SMP #%d %s %dHz %dBit %s, %dTick\n", smp_num, it_samples[smp_num].SampleName, it_samples[smp_num].speedTable[note],
-                                                            it_samples[smp_num].Flg.use16Bit ? 16 : 8, it_samples[smp_num].Flg.stereo ? "Stereo" : "Mono", time);
+    printf("Playing SMP #%d %s %dHz %dBit %s %s %s, %dTick\n", smp_num, it_samples[smp_num].SampleName, it_samples[smp_num].speedTable[note],
+                                                            it_samples[smp_num].Flg.use16Bit ? 16 : 8, it_samples[smp_num].Cvt.sampIsSigned ? "Signed" : "UnSigned",
+                                                            it_samples[smp_num].Flg.stereo ? "Stereo" : "Mono",
+                                                            it_samples[smp_num].Cvt.sampIsDPCM ? "DPCM" : "PCM", time);
     note_stat[0] = NOTE_ON;
+    int_index[0] = 0;
+    frac_index[0] = 0;
+    // note_vol[0] = 0;
     for (uint32_t t = 0; t < time; t++) {
-        audioBuffer[buffPoint] = make_sound(it_samples[smp_num].speedTable[note], 64, 0, smp_num);
+        audioBuffer[buffPoint] = make_sound(it_samples[smp_num].speedTable[note], 16, 0, smp_num);
         buffPoint++;
         if (buffPoint > BUFF_SIZE) {
             buffPoint = 0;
@@ -230,41 +232,13 @@ void playTask(void *arg) {
             if (tick >= TicksRow) {
                 tick = 0;
                 for (uint16_t chl = 0; chl < maxChannel; chl++) {
-                    uint8_t inst_tmp = unpack_data[tracker_pats][chl][tracker_rows].instrument;
-                    uint8_t note_tmp = unpack_data[tracker_pats][chl][tracker_rows].note;
-                    now_efct0[chl] = unpack_data[tracker_pats][chl][tracker_rows].command;
-                    now_efct1[chl] = unpack_data[tracker_pats][chl][tracker_rows].command_value;
-
-                    if (now_efct0[chl] == 1) {
-                        TicksRow = now_efct1[chl];
-                    }
-
-                    uint8_t vol_tmp = unpack_data[tracker_pats][chl][tracker_rows].volume;
-                    if (vol_tmp)
-                        now_vol[chl] = vol_tmp;
-
-                    if (note_tmp) {
-                        now_note[chl] = note_tmp;
-                        note_stat[chl] = NOTE_ON;
-                        int_index[chl] = 0;
-                        frac_index[chl] = 0;
-                        // note_vol[chl] = 
-                    }
-
-                    if (inst_tmp) {
-                        now_inst[chl] = inst_tmp - 1;
-                        now_samp[chl] = it_instrument[now_inst[chl]].noteToSampTable[now_note[chl]].sample - 1;
-                        // printf("now_samp[%d] = %d\n", chl, it_instrument[now_inst[chl]].noteToSampTable[now_note[chl]].sample - 1);
-                        if (note_tmp) {
-                            now_freq[chl] = it_samples[now_samp[chl]].speedTable[note_tmp];
-                        }
-                    }
+                    // 这里的逻辑本身是轨道读取，之前有个简单的实现但是我觉得可能会造成石山所以准备重构...
                 }
-                printf("%2d %3d: ", tracker_pats, tracker_rows);
-                for (uint8_t i = 31; i < maxChannel; i++) {
-                    printf("%3d %2d %2d |", now_note[i], now_inst[i], now_samp[i]);
-                }
-                printf("\n");
+                // printf("%2d %3d: ", tracker_pats, tracker_rows);
+                // for (uint8_t i = 0; i < 12; i++) {
+                //     printf("%3d %2d %2d |", now_note[i], now_inst[i], now_samp[i]);
+                // }
+                // printf("\n");
                 tracker_rows++;
                 if (tracker_rows >= maxRowTable[tracker_pats]) {
                     tracker_rows = 0;
@@ -328,7 +302,7 @@ void mainTask(void *arg) {
     terminal.addCommand("play_smp", play_samp_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
-    FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
+    FILE *file = fopen("/spiffs/laamaa_-_talossa2.it", "rb");
 
     // Read Header
     read_it_header(file, &it_header);

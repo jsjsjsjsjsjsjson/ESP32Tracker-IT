@@ -513,7 +513,31 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     }
     printf("File Jmp To 0x%x\n", ftell(file));
     printf("reading data...\n");
-    fread(sample->sample_data, sampRelSizeByte, 1, file);
+    if (sample->Flg.stereo) {
+        printf("This is a Srereo Sample, Converting...\n");
+        void *tmp = malloc(sampRelSizeByte);
+        fread(tmp, sampRelSizeByte, 1, file);
+        uint32_t dataSize = sampRelSizeByte / 2;
+        printf("%d = %d / 2\n", dataSize, sampRelSizeByte);
+        if (sample->Flg.use16Bit) {
+            uint32_t sampSize = dataSize / 2;
+            audio_stereo_16_t *tmp16 = (audio_stereo_16_t*)sample->sample_data;
+            int16_t *vtmp16 = (int16_t*)tmp;
+            for (uint32_t i = 0; i < sampSize; i++) {
+                tmp16[i].l = vtmp16[i];
+                tmp16[i].r = vtmp16[i+sampSize];
+            }
+        } else {
+            audio_stereo_8_t *tmp8 = (audio_stereo_8_t*)sample->sample_data;
+            int8_t *vtmp8 = (int8_t*)tmp;
+            for (uint32_t i = 0; i < dataSize; i++) {
+                tmp8[i].l = vtmp8[i];
+                tmp8[i].r = vtmp8[i+dataSize];
+            }
+        }
+    } else {
+        fread(sample->sample_data, sampRelSizeByte, 1, file);
+    }
     printf("read finish!\n");
 }
 
