@@ -385,7 +385,8 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     fread(&pattern_data, 2, 2, file);
     printf("Rows %d, Len %d\n", pattern_data.rows, pattern_data.length);
     if (pattern_data.rows > 200 || pattern_data.rows < 32 || pattern_data.length > 65527) {
-        printf("This is not a valid Pattern!\n");
+        printf("This is not a valid Pattern!\n\n");
+        *RowsOut = 0;
         return;
     }
     fseek(file, 4, SEEK_CUR);
@@ -398,8 +399,6 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
         unpack_data[i] = (pattern_note_t*)malloc(pattern_data.rows * sizeof(pattern_note_t));
         if (unpack_data[i] == NULL) {
             printf("malloc failed! free_heap_size: %d\n", esp_get_free_heap_size());
-        } else {
-            // printf("malloc finish! free_heap_size: %d\n", esp_get_free_heap_size());
         }
         memset(unpack_data[i], 0, pattern_data.rows * sizeof(pattern_note_t));
     }

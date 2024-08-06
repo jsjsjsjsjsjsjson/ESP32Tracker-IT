@@ -328,6 +328,7 @@ void mainTask(void *arg) {
 
     // Read Pattern
     unpack_data = (pattern_note_t***)malloc(it_header.PatNum * sizeof(pattern_note_t**));
+    memset(unpack_data, 0, it_header.PatNum * sizeof(unpack_data));
     for (uint16_t pat = 0; pat < it_header.PatNum; pat++) {
         unpack_data[pat] = (pattern_note_t**)malloc(MAX_CHANNELS * sizeof(pattern_note_t*));
     }
@@ -341,13 +342,14 @@ void mainTask(void *arg) {
     printf("This is a %d Channel IT\n", maxChannel);
     printf("Freeing up memory on redundant channels...\n");
     for (uint16_t pat = 0; pat < it_header.PatNum; pat++) {
-        if (unpack_data[pat] == NULL) {
-            printf("Pat #%d is valid, Skip!\n", pat);
-        } else {
+        if (maxRowTable[pat]) {
+            printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
             for (uint16_t chl = maxChannel; chl < MAX_CHANNELS; chl++) {
                 free(unpack_data[pat][chl]);
             }
-            printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
+        } else {
+            printf("Pat #%d is valid, Skip!\n", pat);
+            free(unpack_data[pat]);
         }
     }
     printf("%d\n", sizeof(it_instrument_t));
