@@ -211,6 +211,7 @@ typedef struct {
     uint8_t volume;
     uint8_t command;
     uint8_t command_value;
+    uint8_t mask;
 } pattern_note_t;
 
 typedef struct {
@@ -229,19 +230,18 @@ int unpack_pattern(it_packed_pattern_t *packed_pattern, pattern_note_t *unpack_d
     int8_t last_command[MAX_CHANNELS] = {-1};
     int8_t last_command_value[MAX_CHANNELS] = {-1};
 
-    int max_channel_used = -1; // Initialize the maximum channel used.
+    int max_channel_used = -1;
 
     for (uint16_t row = 0; row < packed_pattern->rows; ++row) {
         while (1) {
             uint8_t channel_variable = *data++;
             if (channel_variable == 0) {
-                // End of row
                 break;
             }
 
             uint8_t channel = (channel_variable - 1) & 63;
             if (channel > max_channel_used) {
-                max_channel_used = channel; // Update max channel used if this channel is higher.
+                max_channel_used = channel;
             }
 
             uint8_t mask;
@@ -254,6 +254,7 @@ int unpack_pattern(it_packed_pattern_t *packed_pattern, pattern_note_t *unpack_d
             }
 
             pattern_note_t *note = &unpack_data[channel][row];
+            note->mask = mask;
 
             if (mask & 1) {
                 note->note = *data++;
@@ -288,7 +289,7 @@ int unpack_pattern(it_packed_pattern_t *packed_pattern, pattern_note_t *unpack_d
         }
     }
 
-    return max_channel_used; // Return the maximum channel number used.
+    return max_channel_used;
 }
 
 void read_it_header(FILE *file, it_header_t *header) {
@@ -453,7 +454,7 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("IMPS: %.4s\n", sample->IMPS);
     printf("DOSFilename: %.12s\n", sample->DOSFilename);
     printf("Reserved: 0x%x\n", sample->Reserved);
-    printf("Gvl: 0x%x\n", sample->Gvl);
+    printf("Gvl: %d\n", sample->Gvl);
     printf("Flg: 0x%x\n", sample->Flg);
 
     printf("  smpWithHead: %d\n", sample->Flg.sampWithHead);
@@ -465,7 +466,7 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("  pingPongLoop: %d\n", sample->Flg.pingPongLoop);
     printf("  pingPongSusLoop: %d\n", sample->Flg.pingPongSusLoop);
 
-    printf("Vol: 0x%x\n", sample->Vol);
+    printf("Vol: %d\n", sample->Vol);
     printf("SampleName: %.26s\n", sample->SampleName);
     printf("Cvt: 0x%x\n", sample->Cvt);
     printf("DfP: 0x%x\n", sample->DfP);

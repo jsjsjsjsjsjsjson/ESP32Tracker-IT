@@ -30,4 +30,15 @@ void convert_c5speed(uint32_t C5_Speed, uint32_t midi_frequencies[128]) {
     }
 }
 
+// 函数将MIDI音符转换为字符串
+void midi_note_to_string(uint8_t midi_note, char result[4]) {
+    const char* note_names[] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
+    const char* note_name = note_names[midi_note % 12];
+    int8_t octave = midi_note / 12;
+    result[0] = note_name[0];
+    result[1] = note_name[1];
+    result[2] = '0' + octave;
+    result[3] = '\0';
+}
+
 #endif

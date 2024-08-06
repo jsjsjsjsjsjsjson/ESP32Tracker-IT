@@ -8,7 +8,7 @@
 #include "extra_func.h"
 #include "vol_table.h"
 
-Adafruit_SSD1306 display(128, 64, &SPI, 7, 15, 6);
+Adafruit_SSD1306 display(128, 64, &SPI, 7, 15, 6, 10000000);
 
 #define SMP_RATE 22050
 #define BUFF_SIZE 4096
@@ -41,7 +41,45 @@ pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
 
+uint8_t GlobalVol;
+
+uint8_t ChannelVol[MAX_CHANNELS];
+uint8_t ChannelPan[MAX_CHANNELS];
+
 uint16_t maxChannel = 0;
+
+void volCmdToRel(uint8_t val, char *flg, uint8_t *rel_val) {
+    *flg = 'v';
+    if (val > 64 && val < 75) {
+        *flg = 'a';
+        val -= 65;
+    } else if (val > 74 && val < 85) {
+        *flg = 'b';
+        val -= 75;
+    } else if (val > 84 && val < 95) {
+        *flg = 'c';
+        val -= 85;
+    } else if (val > 94 && val < 105) {
+        *flg = 'd';
+        val -= 95;
+    } else if (val > 104 && val < 115) {
+        *flg = 'e';
+        val -= 105;
+    } else if (val > 114 && val < 125) {
+        *flg = 'f';
+        val -= 115;
+    } else if (val > 127 && val < 193) {
+        *flg = 'p';
+        val -= 128;
+    } else if (val > 192 && val < 203) {
+        *flg = 'g';
+        val -= 193;
+    } else if (val > 202 && val < 213) {
+        *flg = 'h';
+        val -= 203;
+    }
+    *rel_val = val;
+}
 
 void get_track(int argc, const char* argv[]) {
     if (argc < 6) {
@@ -55,17 +93,48 @@ void get_track(int argc, const char* argv[]) {
     uint16_t rowend = strtol(argv[5], NULL, 0);
     printf("ROWS |");
     for (uint16_t i = chlstart; i < chlend; i++) {
-            printf("  Channel%2d         |", i);
+            printf("   Channel%02d   |Mask|", i);
+    }
+    printf("\n");
+    for (uint16_t i = chlstart; i < chlend; i++) {
+            printf("----------------------", i);
     }
     printf("\n");
     for (uint16_t row_index = rowstart; row_index < rowend; row_index++) {
-        printf("%3d: |", row_index);
+        printf("%03d: |", row_index);
         for (uint16_t chl_index = chlstart; chl_index < chlend; chl_index++) {
-            printf("%3d %3d %3d %3d %3d |", unpack_data[pat][chl_index][row_index].note, 
-                                                unpack_data[pat][chl_index][row_index].instrument,
-                                                    unpack_data[pat][chl_index][row_index].volume,
-                                                        unpack_data[pat][chl_index][row_index].command,
-                                                            unpack_data[pat][chl_index][row_index].command_value);
+            char note_tmp[4] = "---";
+            uint8_t mask = unpack_data[pat][chl_index][row_index].mask;
+            if (mask & 1 || mask & 16) {
+                midi_note_to_string(unpack_data[pat][chl_index][row_index].note, note_tmp);
+                printf("%s ", note_tmp);
+            } else {
+                printf("--- ");
+            }
+
+            if (mask & 2 || mask & 32) {
+                printf("%02d ", unpack_data[pat][chl_index][row_index].instrument);
+            } else {
+                printf("-- ");
+            }
+
+            if (mask & 4 || mask & 64) {
+                uint8_t vtmp;
+                char stat;
+                volCmdToRel(unpack_data[pat][chl_index][row_index].volume, &stat, &vtmp);
+                printf("%c%02d ", stat, vtmp);
+            } else {
+                printf("--- ");
+            }
+
+            if (mask & 8 || mask & 128) {
+                printf("%c%02x ", unpack_data[pat][chl_index][row_index].command + 64,
+                                    unpack_data[pat][chl_index][row_index].command_value);
+            } else {
+                printf("--- ");
+            }
+
+            printf("|0x%02x|", unpack_data[pat][chl_index][row_index].mask);
         }
         printf("\n");
     }
@@ -92,14 +161,25 @@ typedef enum __attribute__((packed)) {
 
 note_stat_t note_stat[MAX_CHANNELS];
 uint8_t note_vol[MAX_CHANNELS];
+uint8_t note_env_vol[MAX_CHANNELS];
+uint16_t note_fade_comp[MAX_CHANNELS];
+uint8_t now_note[MAX_CHANNELS];
+float now_freq[MAX_CHANNELS];
+uint8_t note_samp[MAX_CHANNELS];
+uint8_t note_inst[MAX_CHANNELS];
+uint8_t note_efct0[MAX_CHANNELS];
+uint8_t note_efct1[MAX_CHANNELS];
+
 uint64_t frac_index[MAX_CHANNELS];
 uint32_t int_index[MAX_CHANNELS];
 
 // 这个make_sound实现非常非常慢，希望好心人能优化一下
-inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t chl, uint16_t smp_num) {
+inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol, uint8_t volEnvVal, uint16_t noteFadeComp, uint8_t chl, uint16_t smp_num) {
     audio_stereo_16_t result = {0, 0};
-    if (note_stat[chl] == NOTE_OFF || vol == 0 || it_samples[smp_num].sample_data == NULL) 
+    if ((note_stat[chl] == NOTE_OFF || vol == 0 || instVol == 0 || volEnvVal == 0 || noteFadeComp == 0)
+        || (it_samples[smp_num].sample_data == NULL)) {
         return result;
+    }
     it_sample_t *sample = &it_samples[smp_num];
     uint64_t increment = (freq << 16) / SMP_RATE;
     frac_index[chl] += increment;
@@ -135,10 +215,11 @@ inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t chl, uin
             result = (audio_stereo_16_t){(int16_t)(dataTmp[idx] << 8), (int16_t)(dataTmp[idx] << 8)};
         }
     }
-
-    float vol_factor = vol_table[vol];
-    result.l *= vol_factor;
-    result.r *= vol_factor;
+    uint64_t tFV = vol * it_samples[smp_num].Gvl * instVol * ChannelVol[chl] * GlobalVol * volEnvVal * noteFadeComp;
+    uint8_t FV = (tFV << 41);
+    printf("note_stat: %d, vol: %d, instVol: %d, volFadeComp %d, tFV: %" PRIu64 " FV: %d\n", note_stat[chl], vol, instVol, noteFadeComp, tFV, FV);
+    result.l *= vol_table[FV];
+    result.r *= vol_table[FV];
     return result;
 }
 
@@ -161,7 +242,7 @@ void play_samp_cmd(int argc, const char* argv[]) {
     frac_index[0] = 0;
     // note_vol[0] = 0;
     for (uint32_t t = 0; t < time; t++) {
-        audioBuffer[buffPoint] = make_sound(it_samples[smp_num].speedTable[note], 16, 0, smp_num);
+        audioBuffer[buffPoint] = make_sound(it_samples[smp_num].speedTable[note], 64, 128, 64, 1024, 0, smp_num);
         buffPoint++;
         if (buffPoint > BUFF_SIZE) {
             buffPoint = 0;
@@ -178,14 +259,6 @@ void pause_serial() {
     Serial.read();
 }
 
-uint8_t now_note[MAX_CHANNELS];
-float now_freq[MAX_CHANNELS];
-uint8_t now_vol[MAX_CHANNELS];
-uint8_t now_samp[MAX_CHANNELS];
-uint8_t now_inst[MAX_CHANNELS];
-uint8_t now_efct0[MAX_CHANNELS];
-uint8_t now_efct1[MAX_CHANNELS];
-
 void playTask(void *arg) {
     size_t writed;
     printf("Initialisation....\n");
@@ -200,18 +273,18 @@ void playTask(void *arg) {
     uint32_t tempo_tick = 0;
     uint32_t tick = 0;
     memset(now_note, 0, sizeof(now_note));
-    memset(now_vol, 0, sizeof(now_vol));
+    memset(note_vol, 0, sizeof(note_vol));
     memset(now_freq, 0, sizeof(now_freq));
-    memset(now_vol, 0, sizeof(now_vol));
-    memset(now_samp, 0, sizeof(now_samp));
-    memset(now_inst, 0, sizeof(now_inst));
+    memset(note_vol, 0, sizeof(note_vol));
+    memset(note_samp, 0, sizeof(note_samp));
+    memset(note_inst, 0, sizeof(note_inst));
     printf("Readly...\n");
     // pause_serial();
     for (;;) {
         audio_stereo_32_t tmp = {0, 0};
         for (uint16_t chl = 0; chl < maxChannel; chl++) {
             audio_stereo_16_t tmp16;
-            tmp16 = make_sound(now_freq[chl], now_vol[chl], chl, now_samp[chl]);
+            tmp16 = make_sound(now_freq[chl], note_vol[chl], it_instrument[note_inst[chl]].GbV, note_env_vol[chl], note_fade_comp[chl], chl, note_samp[chl]);
             tmp.l += tmp16.l;
             tmp.r += tmp16.r;
         }
@@ -296,6 +369,9 @@ void mainTask(void *arg) {
     SPI.begin(17, -1, 16);
     display.begin(SSD1306_SWITCHCAPVCC);
     display.display();
+    display.setTextColor(1);
+    display.setTextSize(0);
+    display.setTextWrap(true);
     terminal.begin(115200, "ESP32Tracker DEBUG");
     terminal.addCommand("reboot", reboot_cmd);
     terminal.addCommand("get_track", get_track);
@@ -309,12 +385,23 @@ void mainTask(void *arg) {
     FILE *file = fopen("/spiffs/fod_splice_slice.it", "rb");
 
     // Read Header
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.printf("Read Header...");
+    display.display();
     read_it_header(file, &it_header);
+    GlobalVol = it_header.GV;
+    memcpy(ChannelVol, it_header.ChnlVol, MAX_CHANNELS);
+    memcpy(ChannelPan, it_header.ChnlPan, MAX_CHANNELS);
     pause_serial();
 
     // Read Instrument
     it_instrument = (it_instrument_t*)malloc(it_header.InsNum * sizeof(it_instrument_t));
     for (uint16_t inst = 0; inst < it_header.InsNum; inst++) {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.printf("Read Header...");
+        display.display();
         printf("Reading Instrument #%d...\n", inst);
         read_it_inst(file, it_header.InstOfst[inst], &it_instrument[inst]);
     }
@@ -322,6 +409,10 @@ void mainTask(void *arg) {
     // Read Samples
     it_samples = (it_sample_t*)malloc(it_header.SmpNum * sizeof(it_sample_t));
     for (uint16_t smp = 0; smp < it_header.SmpNum; smp++) {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.printf("Reading Sample #%d...", smp);
+        display.display();
         printf("Reading Sample #%d...\n", smp);
         read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp]);
     }
@@ -335,6 +426,10 @@ void mainTask(void *arg) {
     maxChlTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
     maxRowTable = (uint16_t*)malloc(it_header.PatNum * sizeof(uint16_t));
     for (uint16_t i = 0; i < it_header.PatNum; i++) {
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.printf("Unpack Pattern #%d...", i);
+        display.display();
         printf("Read and Unpack Pattern #%d...\n", i);
         read_and_unpack_pattern(file, it_header.PatternOfst[i], unpack_data[i], &maxChlTable[i], &maxRowTable[i]);
     }
@@ -354,7 +449,7 @@ void mainTask(void *arg) {
     }
     printf("%d\n", sizeof(it_instrument_t));
     fclose(file);
-    xTaskCreate(displayTask, "DISPLAY", 4096, NULL, 4, NULL);
+    xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
 
     for (;;) {
         terminal.update();
