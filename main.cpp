@@ -8,7 +8,7 @@
 #include "extra_func.h"
 #include "vol_table.h"
 
-Adafruit_SSD1306 display(128, 64, &Wire);
+Adafruit_SSD1306 display(128, 64, &SPI, 7, 15, 6);
 
 #define SMP_RATE 22050
 #define BUFF_SIZE 4096
@@ -257,8 +257,12 @@ void playTask(void *arg) {
 void displayTask(void *arg) {
     for (;;) {
         display.clearDisplay();
-        for (uint8_t i = 0; i < 64; i++) {
-            display.drawFastHLine(0, i, now_vol[i], 1);
+        // for (uint8_t i = 0; i < 64; i++) {
+        //     display.drawFastHLine(0, i, now_vol[i], 1);
+        // }
+        for (uint8_t i = 0; i < 127; i++) {
+            display.drawPixel(i, 31 + (audioBuffer[i<<2].l >> 9), 1);
+            display.drawPixel(i, 31 + (audioBuffer[i<<2].r >> 9), 1);
         }
         display.display();
         vTaskDelay(1);
@@ -267,10 +271,7 @@ void displayTask(void *arg) {
 
 void start_play_cmd(int argc, const char* argv[]) {
     printf("Starting PlayTask...\n");
-    Wire.begin(1, 2, 1000000);
-    display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false);
-    xTaskCreate(displayTask, "DISPLAY", 4096, NULL, 4, NULL);
-    xTaskCreate(playTask, "PLAYTASK", 10240, NULL, 7, NULL);
+    xTaskCreate(playTask, "PLAYTASK", 10240, NULL, 6, NULL);
 }
 
 void get_c5_speed_cmd(int argc, const char* argv[]) {
@@ -292,6 +293,9 @@ void get_speed_table_cmd(int argc, const char* argv[]) {
 
 void mainTask(void *arg) {
     SerialTerminal terminal;
+    SPI.begin(17, -1, 16);
+    display.begin(SSD1306_SWITCHCAPVCC);
+    display.display();
     terminal.begin(115200, "ESP32Tracker DEBUG");
     terminal.addCommand("reboot", reboot_cmd);
     terminal.addCommand("get_track", get_track);
@@ -302,7 +306,7 @@ void mainTask(void *arg) {
     terminal.addCommand("play_smp", play_samp_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
-    FILE *file = fopen("/spiffs/laamaa_-_talossa2.it", "rb");
+    FILE *file = fopen("/spiffs/fod_splice_slice.it", "rb");
 
     // Read Header
     read_it_header(file, &it_header);
@@ -337,13 +341,18 @@ void mainTask(void *arg) {
     printf("This is a %d Channel IT\n", maxChannel);
     printf("Freeing up memory on redundant channels...\n");
     for (uint16_t pat = 0; pat < it_header.PatNum; pat++) {
-        for (uint16_t chl = maxChannel; chl < MAX_CHANNELS; chl++) {
-            free(unpack_data[pat][chl]);
+        if (unpack_data[pat] == NULL) {
+            printf("Pat #%d is valid, Skip!\n", pat);
+        } else {
+            for (uint16_t chl = maxChannel; chl < MAX_CHANNELS; chl++) {
+                free(unpack_data[pat][chl]);
+            }
+            printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
         }
-        printf("Free Pat %d's Chl%d ~ Chl%d\n", pat, maxChannel, MAX_CHANNELS);
     }
     printf("%d\n", sizeof(it_instrument_t));
     fclose(file);
+    xTaskCreate(displayTask, "DISPLAY", 4096, NULL, 4, NULL);
 
     for (;;) {
         terminal.update();

@@ -374,7 +374,7 @@ void read_it_header(FILE *file, it_header_t *header) {
     for (int i = 0; i < header->PatNum; i++) {
         printf("0x%x ", header->PatternOfst[i]);
     }
-    printf("\n");
+    printf("\n\n");
 }
 
 void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpack_data, uint16_t *ChannelsOut, uint16_t *RowsOut) {
@@ -384,6 +384,10 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     printf("File Jmp To 0x%x\n", ftell(file));
     fread(&pattern_data, 2, 2, file);
     printf("Rows %d, Len %d\n", pattern_data.rows, pattern_data.length);
+    if (pattern_data.rows > 200 || pattern_data.rows < 32 || pattern_data.length > 65527) {
+        printf("This is not a valid Pattern!\n");
+        return;
+    }
     fseek(file, 4, SEEK_CUR);
     printf("malloc mem\n");
     pattern_data.packed_data = (uint8_t*)malloc(pattern_data.length);
@@ -392,6 +396,11 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     printf("malloc unpack mem\n");
     for (uint8_t i = 0; i < MAX_CHANNELS; i++) {
         unpack_data[i] = (pattern_note_t*)malloc(pattern_data.rows * sizeof(pattern_note_t));
+        if (unpack_data[i] == NULL) {
+            printf("malloc failed! free_heap_size: %d\n", esp_get_free_heap_size());
+        } else {
+            // printf("malloc finish! free_heap_size: %d\n", esp_get_free_heap_size());
+        }
         memset(unpack_data[i], 0, pattern_data.rows * sizeof(pattern_note_t));
     }
     printf("unpacking...\n");
@@ -400,7 +409,7 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     *RowsOut = pattern_data.rows;
     printf("free\n");
     free(pattern_data.packed_data);
-    printf("free finish\n");
+    printf("free finish\n\n");
 }
 
 void read_it_inst(FILE *file, uint32_t offset, it_instrument_t *inst) {
@@ -416,7 +425,7 @@ void read_it_inst(FILE *file, uint32_t offset, it_instrument_t *inst) {
     for (uint8_t i = 0; i < 120; i++) {
         printf("%d ", inst->noteToSampTable[i].sample);
     }
-    printf("\n");
+    printf("\n\n");
 
     /*
     printf("Vol Env:\n");
@@ -538,7 +547,7 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     } else {
         fread(sample->sample_data, sampRelSizeByte, 1, file);
     }
-    printf("read finish!\n");
+    printf("read finish!\n\n");
 }
 
 #endif // IT_FILE_H
