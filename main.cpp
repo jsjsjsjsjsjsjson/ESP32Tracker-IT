@@ -10,16 +10,16 @@
 
 Adafruit_SSD1306 display(128, 64, &SPI, 7, 15, 6, 10000000);
 
-#define SMP_RATE 22050
+#define SMP_RATE 11025
 #define BUFF_SIZE 4096
 
-audio_stereo_16_t audioBuffer[BUFF_SIZE];
+audio_stereo_32_t audioBuffer[BUFF_SIZE];
 
 i2s_chan_handle_t i2s_tx_handle;
 i2s_chan_config_t i2s_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
 i2s_std_config_t i2s_std_cfg = {
     .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SMP_RATE),
-    .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+    .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
     .gpio_cfg = {
         .mclk = I2S_GPIO_UNUSED,
         .bclk = GPIO_NUM_42,
@@ -105,33 +105,33 @@ void get_track(int argc, const char* argv[]) {
         for (uint16_t chl_index = chlstart; chl_index < chlend; chl_index++) {
             char note_tmp[4] = "---";
             uint8_t mask = unpack_data[pat][chl_index][row_index].mask;
-            if (mask & 1 || mask & 16) {
+            if (GET_NOTE(mask)) {
                 midi_note_to_string(unpack_data[pat][chl_index][row_index].note, note_tmp);
                 printf("%s ", note_tmp);
             } else {
-                printf("--- ");
+                printf("... ");
             }
 
-            if (mask & 2 || mask & 32) {
+            if (GET_INSTRUMENT(mask)) {
                 printf("%02d ", unpack_data[pat][chl_index][row_index].instrument);
             } else {
-                printf("-- ");
+                printf(".. ");
             }
 
-            if (mask & 4 || mask & 64) {
+            if (GET_VOLUME(mask)) {
                 uint8_t vtmp;
                 char stat;
                 volCmdToRel(unpack_data[pat][chl_index][row_index].volume, &stat, &vtmp);
                 printf("%c%02d ", stat, vtmp);
             } else {
-                printf("--- ");
+                printf("... ");
             }
 
-            if (mask & 8 || mask & 128) {
+            if (GET_COMMAND(mask)) {
                 printf("%c%02x ", unpack_data[pat][chl_index][row_index].command + 64,
                                     unpack_data[pat][chl_index][row_index].command_value);
             } else {
-                printf("--- ");
+                printf("... ");
             }
 
             printf("|0x%02x|", unpack_data[pat][chl_index][row_index].mask);
@@ -164,27 +164,36 @@ uint8_t note_vol[MAX_CHANNELS];
 uint8_t note_env_vol[MAX_CHANNELS];
 uint16_t note_fade_comp[MAX_CHANNELS];
 uint8_t now_note[MAX_CHANNELS];
-float now_freq[MAX_CHANNELS];
+uint32_t now_freq[MAX_CHANNELS];
 uint8_t note_samp[MAX_CHANNELS];
 uint8_t note_inst[MAX_CHANNELS];
 uint8_t note_efct0[MAX_CHANNELS];
 uint8_t note_efct1[MAX_CHANNELS];
 
-uint64_t frac_index[MAX_CHANNELS];
+float frac_index[MAX_CHANNELS];
 uint32_t int_index[MAX_CHANNELS];
 
 // 这个make_sound实现非常非常慢，希望好心人能优化一下
-inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol, uint8_t volEnvVal, uint16_t noteFadeComp, uint8_t chl, uint16_t smp_num) {
-    audio_stereo_16_t result = {0, 0};
+inline audio_stereo_32_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol, uint8_t volEnvVal, uint16_t noteFadeComp, uint8_t chl, uint16_t smp_num) {
+    audio_stereo_32_t result = {0, 0};
     if ((note_stat[chl] == NOTE_OFF || vol == 0 || instVol == 0 || volEnvVal == 0 || noteFadeComp == 0)
         || (it_samples[smp_num].sample_data == NULL)) {
+        // printf("CHL%02d: GlobalVol %d, note_stat %d, ChannelVol %d, vol %d, instVol %d, noteFadeComp %d, sampleVol %d\n", chl, GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl);
         return result;
     }
     it_sample_t *sample = &it_samples[smp_num];
+    /*
     uint64_t increment = (freq << 16) / SMP_RATE;
     frac_index[chl] += increment;
-    int_index[chl] += frac_index[chl] >> 16;
+    int_index[chl] += frac_index[chl];
     frac_index[chl] &= 0xFFFF;
+    */
+    float increment = (float)freq / SMP_RATE;
+    frac_index[chl] += increment;
+    if (frac_index[chl] >= 1.0) {
+        int_index[chl] += (int)frac_index[chl]; // Increment the integer index by the whole part of frac_index
+        frac_index[chl] -= (int)frac_index[chl]; // Keep only the fractional part
+    }
 
     if (sample->Flg.useLoop || sample->Flg.pingPongLoop) {
         if (int_index[chl] >= sample->LoopEnd) {
@@ -192,7 +201,6 @@ inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol,
         }
     } else if (int_index[chl] >= sample->Length) {
         note_stat[chl] = NOTE_OFF;
-        int_index[chl] = frac_index[chl] = note_vol[chl] = 0;
         return result;
     }
 
@@ -200,31 +208,32 @@ inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol,
 
     if (sample->Flg.use16Bit) {
         if (sample->Flg.stereo) {
-            audio_stereo_16_t *dataTmp = (audio_stereo_16_t *)sample->sample_data;
-            result = dataTmp[idx];
+            audio_stereo_16_t dataTmp = GET_SAMPLE_DATA(sample, idx, audio_stereo_16_t);
+            result = (audio_stereo_32_t){(int32_t)dataTmp.l, (int32_t)dataTmp.r};
         } else {
-            audio_mono_16_t *dataTmp = (audio_mono_16_t *)sample->sample_data;
-            result = (audio_stereo_16_t){dataTmp[idx], dataTmp[idx]};
+            audio_mono_16_t dataTmp = GET_SAMPLE_DATA(sample, idx, audio_mono_16_t);
+            result = (audio_stereo_32_t){(int32_t)dataTmp, (int32_t)dataTmp};
         }
     } else {
         if (sample->Flg.stereo) {
-            audio_stereo_8_t *dataTmp = (audio_stereo_8_t *)sample->sample_data;
-            result = (audio_stereo_16_t){(int16_t)(dataTmp[idx].l << 8), (int16_t)(dataTmp[idx].r << 8)};
+            audio_stereo_8_t dataTmp = GET_SAMPLE_DATA(sample, idx, audio_stereo_8_t);
+            result = (audio_stereo_32_t){(int32_t)dataTmp.l << 8, (int32_t)dataTmp.r << 8};
         } else {
-            audio_mono_8_t *dataTmp = (audio_mono_8_t *)sample->sample_data;
-            result = (audio_stereo_16_t){(int16_t)(dataTmp[idx] << 8), (int16_t)(dataTmp[idx] << 8)};
+            audio_mono_8_t dataTmp = GET_SAMPLE_DATA(sample, idx, audio_mono_8_t);
+            result = (audio_stereo_32_t){(int32_t)dataTmp << 8, (int32_t)dataTmp << 8};
         }
     }
-    uint8_t FV = (vol * it_samples[smp_num].Gvl * instVol * ChannelVol[chl] * GlobalVol * volEnvVal * noteFadeComp) << 41;
-    /*
-src/main.cpp: In function 'audio_stereo_16_t make_sound(uint32_t, uint8_t, uint8_t, uint8_t, uint16_t, uint8_t, uint16_t)':
-src/main.cpp:218:117: warning: left shift count >= width of type [-Wshift-count-overflow]
-  218 |     uint8_t FV = (vol * it_samples[smp_num].Gvl * instVol * ChannelVol[chl] * GlobalVol * volEnvVal * noteFadeComp) << 41;
-      |                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
-    */
-    printf("GlobalVol: %d, note_stat: %d, ChannelVol: %d, vol: %d, instVol: %d, noteFadeComp %d, sampleVol: %d, FV: %d\n", GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl, FV);
-    result.l *= vol_table[FV];
-    result.r *= vol_table[FV];
+    uint16_t FV = ((uint64_t)vol *
+               (uint64_t)it_samples[smp_num].Gvl *
+               (uint64_t)instVol *
+               (uint64_t)ChannelVol[chl] *
+               (uint64_t)GlobalVol *
+               (uint64_t)volEnvVal *
+               (uint64_t)noteFadeComp) >> 38;
+
+    // printf("GlobalVol: %d, note_stat: %d, ChannelVol: %d, vol: %d, instVol: %d, noteFadeComp %d, sampleVol: %d, FV: %d\n", GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl, FV);
+    result.l *= FV;
+    result.r *= FV;
     return result;
 }
 
@@ -264,6 +273,48 @@ void pause_serial() {
     Serial.read();
 }
 
+void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
+    if (!instNum) return;
+    instNum -= 1;
+    now_note[chl] = note;
+    note_stat[chl] = NOTE_ON;
+    note_inst[chl] = instNum;
+    note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
+    now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
+    note_vol[chl] = it_samples[note_samp[chl]].Vol;
+    if (reset) {
+        int_index[chl] = 0;
+        frac_index[chl] = 0;
+    }
+}
+
+void setInst(uint8_t chl, uint8_t instNum, bool reset) {
+    if (!instNum) return;
+    instNum -= 1;
+    uint8_t note = now_note[chl];
+    note_stat[chl] = NOTE_ON;
+    note_inst[chl] = instNum;
+    note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
+    now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
+    note_vol[chl] = it_samples[note_samp[chl]].Vol;
+    if (reset) {
+        int_index[chl] = 0;
+        frac_index[chl] = 0;
+    }
+}
+
+void setVolVal(uint8_t chl, uint8_t volVal, bool reset) {
+    char flg;
+    uint8_t relVal;
+    volCmdToRel(volVal, &flg, &relVal);
+    if (flg == 'v')
+        note_vol[chl] = relVal;
+    if (reset) {
+        int_index[chl] = 0;
+        frac_index[chl] = 0;
+    }
+}
+
 void playTask(void *arg) {
     size_t writed;
     printf("Initialisation....\n");
@@ -283,40 +334,39 @@ void playTask(void *arg) {
     memset(note_vol, 0, sizeof(note_vol));
     memset(note_samp, 0, sizeof(note_samp));
     memset(note_inst, 0, sizeof(note_inst));
+    // memset(note_fade_comp, 1024, sizeof(note_fade_comp));
     printf("Readly...\n");
     // pause_serial();
     for (;;) {
-        audio_stereo_32_t tmp = {0, 0};
-        for (uint16_t chl = 0; chl < maxChannel; chl++) {
-            audio_stereo_16_t tmp16;
-            tmp16 = make_sound(now_freq[chl], note_vol[chl], it_instrument[note_inst[chl]].GbV, note_env_vol[chl], note_fade_comp[chl], chl, note_samp[chl]);
-            tmp.l += tmp16.l;
-            tmp.r += tmp16.r;
-        }
-        audioBuffer[bufferIndex].l = tmp.l / maxChannel;
-        audioBuffer[bufferIndex].r = tmp.r / maxChannel;
-        bufferIndex++;
-        tempo_tick++;
-
-        if (bufferIndex > BUFF_SIZE) {
-            bufferIndex = 0;
-            i2s_channel_write(i2s_tx_handle, audioBuffer, sizeof(audioBuffer), &writed, portMAX_DELAY);
-            vTaskDelay(1);
-        }
-
-        if (tempo_tick >= TempoTickMax) {
+        if (tempo_tick > TempoTickMax) {
             tempo_tick = 0;
             tick++;
             if (tick >= TicksRow) {
                 tick = 0;
                 for (uint16_t chl = 0; chl < maxChannel; chl++) {
-                    // 这里的逻辑本身是轨道读取，之前有个简单的实现但是我觉得可能会造成石山所以准备重构...
+                    uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
+                    if (GET_NOTE(mask)) {
+                        startNote(chl, unpack_data[tracker_pats][chl][tracker_rows].note, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
+                    }
+                    if (GET_INSTRUMENT(mask)) {
+                        setInst(chl, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
+                    }
+                    if (GET_VOLUME(mask)) {
+                        setVolVal(chl, unpack_data[tracker_pats][chl][tracker_rows].volume, false);
+                    }
+                    if (GET_COMMAND(mask)) {
+                        uint8_t cmd = unpack_data[tracker_pats][chl][tracker_rows].command;
+                        uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
+                        if (cmd == 1) {
+                            TicksRow = cmdVal;
+                        }
+                    }
                 }
-                // printf("%2d %3d: ", tracker_pats, tracker_rows);
-                // for (uint8_t i = 0; i < 12; i++) {
-                //     printf("%3d %2d %2d |", now_note[i], now_inst[i], now_samp[i]);
-                // }
-                // printf("\n");
+                printf("%02d %03d: ", tracker_pats, tracker_rows);
+                for (uint8_t i = 0; i < 10; i++) {
+                    printf("%1d %03d %02d %02d %02d |", note_stat[i], now_note[i], note_inst[i], note_samp[i], note_vol[i]);
+                }
+                printf("\n");
                 tracker_rows++;
                 if (tracker_rows >= maxRowTable[tracker_pats]) {
                     tracker_rows = 0;
@@ -327,6 +377,22 @@ void playTask(void *arg) {
                     printf("skip to %d -> %d\n", tracker_ords, tracker_pats);
                 }
             }
+        }
+        audio_stereo_32_t buftmp = {0, 0};
+        for (uint16_t chl = 0; chl < maxChannel; chl++) {
+            audio_stereo_32_t tmp = {0, 0};
+            tmp = make_sound(now_freq[chl], note_vol[chl], it_instrument[note_inst[chl]].GbV, 64, 1024, chl, note_samp[chl]);
+            buftmp.l += tmp.l *2;
+            buftmp.r += tmp.r *2;
+        }
+        audioBuffer[bufferIndex] = buftmp;
+        bufferIndex++;
+        tempo_tick++;
+
+        if (bufferIndex > BUFF_SIZE) {
+            bufferIndex = 0;
+            i2s_channel_write(i2s_tx_handle, audioBuffer, sizeof(audioBuffer), &writed, portMAX_DELAY);
+            vTaskDelay(1);
         }
     }
     vTaskDelete(NULL);
@@ -339,8 +405,8 @@ void displayTask(void *arg) {
         //     display.drawFastHLine(0, i, now_vol[i], 1);
         // }
         for (uint8_t i = 0; i < 127; i++) {
-            display.drawPixel(i, 31 + (audioBuffer[i<<2].l >> 9), 1);
-            display.drawPixel(i, 31 + (audioBuffer[i<<2].r >> 9), 1);
+            display.drawPixel(i, 31 + (audioBuffer[i<<3].l >> 26), 1);
+            display.drawPixel(i, 31 + (audioBuffer[i<<3].r >> 26), 1);
         }
         display.display();
         vTaskDelay(1);

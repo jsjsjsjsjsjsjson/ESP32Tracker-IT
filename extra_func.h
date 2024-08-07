@@ -11,6 +11,13 @@
 
 #define TEMPO_TO_TICKS(tempo, smp_rate) ((2500 / tempo) * 0.001) * smp_rate
 
+#define GET_SAMPLE_DATA(sample, idx, type) ((type *)sample->sample_data)[idx]
+
+#define GET_NOTE(mask)    ((mask) & 1 || (mask) & 16)
+#define GET_INSTRUMENT(mask) ((mask) & 2 || (mask) & 32)
+#define GET_VOLUME(mask)  ((mask) & 4 || (mask) & 64)
+#define GET_COMMAND(mask) ((mask) & 8 || (mask) & 128)
+
 uint16_t findMax(uint16_t arr[], uint16_t size) {
     if (size == 0) return INT16_MIN;
     uint16_t max = arr[0];
@@ -30,8 +37,17 @@ void convert_c5speed(uint32_t C5_Speed, uint32_t midi_frequencies[128]) {
     }
 }
 
-// 函数将MIDI音符转换为字符串
 void midi_note_to_string(uint8_t midi_note, char result[4]) {
+    if (midi_note > 119) {
+        if (midi_note == 254)
+            result = "^^^";
+        else if (midi_note == 255)
+            result = "===";
+        else
+            result = "~~~";
+
+        return;
+    }
     const char* note_names[] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
     const char* note_name = note_names[midi_note % 12];
     int8_t octave = midi_note / 12;
