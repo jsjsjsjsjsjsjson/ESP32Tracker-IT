@@ -10,8 +10,8 @@
 
 Adafruit_SSD1306 display(128, 64, &SPI, 7, 15, 6, 10000000);
 
-#define SMP_RATE 11025
-#define BUFF_SIZE 4096
+#define SMP_RATE 22050
+#define BUFF_SIZE 8192
 
 audio_stereo_32_t audioBuffer[BUFF_SIZE];
 
@@ -338,7 +338,7 @@ void playTask(void *arg) {
     printf("Readly...\n");
     // pause_serial();
     for (;;) {
-        if (tempo_tick > TempoTickMax) {
+        if (tempo_tick >= TempoTickMax) {
             tempo_tick = 0;
             tick++;
             if (tick >= TicksRow) {
@@ -355,18 +355,21 @@ void playTask(void *arg) {
                         setVolVal(chl, unpack_data[tracker_pats][chl][tracker_rows].volume, false);
                     }
                     if (GET_COMMAND(mask)) {
-                        uint8_t cmd = unpack_data[tracker_pats][chl][tracker_rows].command;
+                        char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                         uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
-                        if (cmd == 1) {
+                        if (cmd == 'A') {
                             TicksRow = cmdVal;
+                        }
+                        if (cmd == 'M') {
+                            ChannelVol[chl] = cmdVal;
                         }
                     }
                 }
-                printf("%02d %03d: ", tracker_pats, tracker_rows);
-                for (uint8_t i = 0; i < 10; i++) {
-                    printf("%1d %03d %02d %02d %02d |", note_stat[i], now_note[i], note_inst[i], note_samp[i], note_vol[i]);
-                }
-                printf("\n");
+                //printf("%02d %03d: ", tracker_pats, tracker_rows);
+                //for (uint8_t i = 0; i < 10; i++) {
+                //    printf("%1d %03d %02d %02d %02d |", note_stat[i], now_note[i], note_inst[i], note_samp[i], note_vol[i]);
+                //}
+                //printf("\n");
                 tracker_rows++;
                 if (tracker_rows >= maxRowTable[tracker_pats]) {
                     tracker_rows = 0;
@@ -520,7 +523,7 @@ void mainTask(void *arg) {
     }
     printf("%d\n", sizeof(it_instrument_t));
     fclose(file);
-    xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
+    // xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
 
     for (;;) {
         terminal.update();
