@@ -489,27 +489,18 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("Sample Data in 0x%x\n", sample->SamplePointer);
     fseek(file, sample->SamplePointer, SEEK_SET);
     uint32_t sampRelSizeByte;
-    printf("Generate frequency tables...\n");
-    printf("C5->A4 = %f\n", sample->C5Speed * powf(2.0f, -9.0f / 12.0f));
     if (sample->Flg.stereo) {
-        if (sample->Flg.use16Bit) {
+        if (sample->Flg.use16Bit)
             sampRelSizeByte = sample->Length * sizeof(audio_stereo_16_t);
-            convert_c5speed(sample->C5Speed, sample->speedTable);
-        } else {
+        else
             sampRelSizeByte = sample->Length * sizeof(audio_stereo_8_t);
-            convert_c5speed(sample->C5Speed, sample->speedTable);
-        }
     } else {
-        if (sample->Flg.use16Bit) {
+        if (sample->Flg.use16Bit)
             sampRelSizeByte = sample->Length * sizeof(audio_mono_16_t);
-            convert_c5speed(sample->C5Speed, sample->speedTable);
-        } else {
+        else
             sampRelSizeByte = sample->Length * sizeof(audio_mono_8_t);
-            convert_c5speed(sample->C5Speed, sample->speedTable);
-        }
     }
     printf("Sample Rel Byte is %d\n", sampRelSizeByte);
-    printf("Generate Success\n");
     printf("malloc mem\n");
     sample->sample_data = malloc(sampRelSizeByte);
     if (sample->sample_data == NULL) {
@@ -548,6 +539,10 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
         fread(sample->sample_data, sampRelSizeByte, 1, file);
     }
     printf("read finish!\n\n");
+    printf("Generate frequency tables...\n");
+    printf("C5->A4 = %f\n", sample->C5Speed * powf(2.0f, -9.0f / 12.0f));
+    convert_c5speed(sample->C5Speed, sample->speedTable);
+    printf("Generate Success\n");
 }
 
 #endif // IT_FILE_H
