@@ -535,6 +535,7 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
                 tmp8[i].r = vtmp8[i+dataSize];
             }
         }
+        free(tmp);
     } else {
         fread(sample->sample_data, sampRelSizeByte, 1, file);
     }
