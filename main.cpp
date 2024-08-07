@@ -215,9 +215,14 @@ inline audio_stereo_16_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol,
             result = (audio_stereo_16_t){(int16_t)(dataTmp[idx] << 8), (int16_t)(dataTmp[idx] << 8)};
         }
     }
-    uint64_t tFV = vol * it_samples[smp_num].Gvl * instVol * ChannelVol[chl] * GlobalVol * volEnvVal * noteFadeComp;
-    uint8_t FV = (tFV << 41);
-    printf("note_stat: %d, vol: %d, instVol: %d, volFadeComp %d, tFV: %" PRIu64 " FV: %d\n", note_stat[chl], vol, instVol, noteFadeComp, tFV, FV);
+    uint8_t FV = (vol * it_samples[smp_num].Gvl * instVol * ChannelVol[chl] * GlobalVol * volEnvVal * noteFadeComp) << 41;
+    /*
+src/main.cpp: In function 'audio_stereo_16_t make_sound(uint32_t, uint8_t, uint8_t, uint8_t, uint16_t, uint8_t, uint16_t)':
+src/main.cpp:218:117: warning: left shift count >= width of type [-Wshift-count-overflow]
+  218 |     uint8_t FV = (vol * it_samples[smp_num].Gvl * instVol * ChannelVol[chl] * GlobalVol * volEnvVal * noteFadeComp) << 41;
+      |                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~
+    */
+    printf("GlobalVol: %d, note_stat: %d, ChannelVol: %d, vol: %d, instVol: %d, noteFadeComp %d, sampleVol: %d, FV: %d\n", GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl, FV);
     result.l *= vol_table[FV];
     result.r *= vol_table[FV];
     return result;
