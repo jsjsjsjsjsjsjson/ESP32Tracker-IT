@@ -18,6 +18,10 @@
 #define GET_VOLUME(mask)  ((mask) & 4 || (mask) & 64)
 #define GET_COMMAND(mask) ((mask) & 8 || (mask) & 128)
 
+#define LINEAR_INTERP(x1, x2, y1, y2, x) \
+    ((y1) + ((y2) - (y1)) * ((x) - (x1)) / ((x2) - (x1)))
+
+
 uint16_t findMax(uint16_t arr[], uint16_t size) {
     if (size == 0) return INT16_MIN;
     uint16_t max = arr[0];
@@ -29,22 +33,22 @@ uint16_t findMax(uint16_t arr[], uint16_t size) {
     return max;
 }
 
-void convert_c5speed(uint32_t C5_Speed, uint32_t midi_frequencies[128]) {
+void convert_c5speed(uint32_t C5_Speed, float midi_frequencies[128]) {
     float semitone_ratio = powf(2.0f, 1.0f / 12.0f);
     float A4_frequency = C5_Speed / powf(semitone_ratio, -9);
-    for (int i = 0; i < 128; ++i) {
-        midi_frequencies[i] = roundf(A4_frequency * powf(semitone_ratio, i - 69));
+    for (uint8_t i = 0; i < 128; ++i) {
+        midi_frequencies[i] = A4_frequency * powf(semitone_ratio, i - 69);
     }
 }
 
 void midi_note_to_string(uint8_t midi_note, char result[4]) {
     if (midi_note > 119) {
         if (midi_note == 254)
-            result = "^^^";
+            strcpy(result, "^^^");
         else if (midi_note == 255)
-            result = "===";
+            strcpy(result, "===");
         else
-            result = "~~~";
+            strcpy(result, "~~~");
 
         return;
     }

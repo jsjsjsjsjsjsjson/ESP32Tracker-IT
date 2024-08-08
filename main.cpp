@@ -11,7 +11,7 @@
 Adafruit_SSD1306 display(128, 64, &SPI, 7, 15, 6, 10000000);
 
 #define SMP_RATE 22050
-#define BUFF_SIZE 8192
+#define BUFF_SIZE 2048
 
 audio_stereo_32_t audioBuffer[BUFF_SIZE];
 
@@ -45,6 +45,9 @@ uint8_t GlobalVol;
 
 uint8_t ChannelVol[MAX_CHANNELS];
 uint8_t ChannelPan[MAX_CHANNELS];
+
+int8_t volEnvVal[MAX_CHANNELS] = {0};
+uint8_t volNode[MAX_CHANNELS] = {0};
 
 uint16_t maxChannel = 0;
 
@@ -144,6 +147,29 @@ void get_free_heap_cmd(int argc, const char* argv[]) {
     printf("Free heap size: %ld\n", esp_get_free_heap_size());
 }
 
+void get_env_cmd(int argc, const char* argv[]) {
+    if (argc < 2) {
+        printf("%s <instNum>\n", argv[0]);
+        return;
+    }
+    uint8_t instNum = strtol(argv[1], NULL, 0);
+    printf("TICK | Y\n");
+    for (uint8_t i = 0; i < it_instrument[instNum].volEnv.Num; i++) {
+        printf("%04d | %02d\n", it_instrument[instNum].volEnv.envelope[i].tick, it_instrument[instNum].volEnv.envelope[i].y);
+    }
+}
+
+void get_env_itp_cmd(int argc, const char* argv[]) {
+    if (argc < 3) {
+        printf("%s <instNum> <tick>\n", argv[0]);
+        return;
+    }
+    uint8_t instNum = strtol(argv[1], NULL, 0);
+    uint16_t tick = strtol(argv[2], NULL, 0);
+    int8_t y = 0;// get_env_y(&it_instrument[instNum].volEnv, tick);
+    printf("TICK%d = ENV%d\n", tick, y);
+}
+
 void reboot_cmd(int argc, const char* argv[]) {
     esp_restart();
 }
@@ -156,7 +182,8 @@ void get_heap_stat(int argc, const char* argv[]) {
 
 typedef enum __attribute__((packed)) {
     NOTE_OFF,
-    NOTE_ON
+    NOTE_ON,
+    NOTE_CONT
 } note_stat_t;
 
 note_stat_t note_stat[MAX_CHANNELS];
@@ -164,17 +191,23 @@ uint8_t note_vol[MAX_CHANNELS];
 uint8_t note_env_vol[MAX_CHANNELS];
 uint16_t note_fade_comp[MAX_CHANNELS];
 uint8_t now_note[MAX_CHANNELS];
-uint32_t now_freq[MAX_CHANNELS];
+float now_freq[MAX_CHANNELS];
 uint8_t note_samp[MAX_CHANNELS];
 uint8_t note_inst[MAX_CHANNELS];
 uint8_t note_efct0[MAX_CHANNELS];
 uint8_t note_efct1[MAX_CHANNELS];
 
+uint16_t vol_env_point[MAX_CHANNELS] = {0};
+uint16_t pan_env_point[MAX_CHANNELS] = {0};
+uint16_t pit_env_point[MAX_CHANNELS] = {0};
+
+uint8_t FV_SHOW[MAX_CHANNELS] = {0};
+
 float frac_index[MAX_CHANNELS];
 uint32_t int_index[MAX_CHANNELS];
 
 // 这个make_sound实现非常非常慢，希望好心人能优化一下
-inline audio_stereo_32_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol, uint8_t volEnvVal, uint16_t noteFadeComp, uint8_t chl, uint16_t smp_num) {
+IRAM_ATTR audio_stereo_32_t make_sound(float freq, uint8_t vol, uint8_t instVol, uint8_t volEnvVal, uint16_t noteFadeComp, uint8_t chl, uint16_t smp_num) {
     audio_stereo_32_t result = {0, 0};
     if ((note_stat[chl] == NOTE_OFF || vol == 0 || instVol == 0 || volEnvVal == 0 || noteFadeComp == 0)
         || (it_samples[smp_num].sample_data == NULL)) {
@@ -190,16 +223,16 @@ inline audio_stereo_32_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol,
     */
     float increment = (float)freq / SMP_RATE;
     frac_index[chl] += increment;
-    if (frac_index[chl] >= 1.0) {
+    if (frac_index[chl] >= 1.0f) {
         int_index[chl] += (int)frac_index[chl]; // Increment the integer index by the whole part of frac_index
         frac_index[chl] -= (int)frac_index[chl]; // Keep only the fractional part
     }
 
     if (sample->Flg.useLoop || sample->Flg.pingPongLoop) {
-        if (int_index[chl] >= sample->LoopEnd) {
+        if (int_index[chl] > sample->LoopEnd) {
             int_index[chl] = sample->LoopBegin;
         }
-    } else if (int_index[chl] >= sample->Length) {
+    } else if (int_index[chl] > sample->Length) {
         note_stat[chl] = NOTE_OFF;
         return result;
     }
@@ -230,6 +263,7 @@ inline audio_stereo_32_t make_sound(uint32_t freq, uint8_t vol, uint8_t instVol,
                (uint64_t)GlobalVol *
                (uint64_t)volEnvVal *
                (uint64_t)noteFadeComp) >> 38;
+    FV_SHOW[chl] = FV >> 4;
 
     // printf("GlobalVol: %d, note_stat: %d, ChannelVol: %d, vol: %d, instVol: %d, noteFadeComp %d, sampleVol: %d, FV: %d\n", GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl, FV);
     result.l *= FV;
@@ -276,6 +310,8 @@ void pause_serial() {
 void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
     if (!instNum) return;
     instNum -= 1;
+    vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
+    volNode[chl] = 0;
     now_note[chl] = note;
     note_stat[chl] = NOTE_ON;
     note_inst[chl] = instNum;
@@ -291,6 +327,8 @@ void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
 void setInst(uint8_t chl, uint8_t instNum, bool reset) {
     if (!instNum) return;
     instNum -= 1;
+    vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
+    volNode[chl] = 0;
     uint8_t note = now_note[chl];
     note_stat[chl] = NOTE_ON;
     note_inst[chl] = instNum;
@@ -346,7 +384,13 @@ void playTask(void *arg) {
                 for (uint16_t chl = 0; chl < maxChannel; chl++) {
                     uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
                     if (GET_NOTE(mask)) {
-                        startNote(chl, unpack_data[tracker_pats][chl][tracker_rows].note, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
+                        uint8_t noteTmp = unpack_data[tracker_pats][chl][tracker_rows].note;
+                        if (noteTmp < 120)
+                            startNote(chl, noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
+                        else {
+                            printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
+                            note_stat[chl] = NOTE_CONT;
+                        }
                     }
                     if (GET_INSTRUMENT(mask)) {
                         setInst(chl, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
@@ -359,9 +403,10 @@ void playTask(void *arg) {
                         uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
                         if (cmd == 'A') {
                             TicksRow = cmdVal;
-                        }
-                        if (cmd == 'M') {
+                        } else if (cmd == 'M') {
                             ChannelVol[chl] = cmdVal;
+                        } else if (cmd == 'V') {
+                            GlobalVol = cmdVal;
                         }
                     }
                 }
@@ -374,17 +419,61 @@ void playTask(void *arg) {
                 if (tracker_rows >= maxRowTable[tracker_pats]) {
                     tracker_rows = 0;
                     tracker_ords++;
-                    if (tracker_ords >= it_header.OrdNum)
+                    while (it_header.Orders[tracker_ords] == 254) {
+                        tracker_ords++;
+                    }
+                    if (it_header.Orders[tracker_ords] == 255)
                         tracker_ords = 0;
+
                     tracker_pats = it_header.Orders[tracker_ords];
                     printf("skip to %d -> %d\n", tracker_ords, tracker_pats);
+                }
+            }
+            for (uint8_t chl = 0; chl < maxChannel; chl++) {
+                if (note_stat[chl] == NOTE_ON) {
+                    bool enbVolEnv = it_instrument[note_inst[chl]].volEnv.Flg.EnvOn;
+                    bool enbPanEnv = it_instrument[note_inst[chl]].panEnv.Flg.EnvOn;
+                    bool enbPitEnv = it_instrument[note_inst[chl]].pitEnv.Flg.EnvOn;
+                    uint8_t volEnvPointNum = it_instrument[note_inst[chl]].volEnv.Num;
+                    uint8_t PanEnvPointNum = it_instrument[note_inst[chl]].panEnv.Num;
+                    uint8_t PitEnvPointNum = it_instrument[note_inst[chl]].pitEnv.Num;
+                    if (enbVolEnv) {
+                        vol_env_point[chl]++;
+                        if (vol_env_point[chl] >= it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].tick) {
+                            volNode[chl]++;
+                            if (volNode[chl] > it_instrument[note_inst[chl]].volEnv.Num - 2) {
+                                volNode[chl] = it_instrument[note_inst[chl]].volEnv.Num - 2;
+                                note_stat[chl] = NOTE_CONT;
+                                vol_env_point[chl]--;
+                            }
+                        }
+                        volEnvVal[chl] = LINEAR_INTERP(it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]].tick,
+                                                        it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].tick,
+                                                            it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]].y,
+                                                                it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].y, vol_env_point[chl]);
+                    } else {
+                        vol_env_point[chl] = 0;
+                    }
+                    if (enbPanEnv) {
+                        pan_env_point[chl]++;
+                    } else {
+                        pan_env_point[chl] = 0;
+                    }
+                    if (enbPitEnv) {
+                        pit_env_point[chl]++;
+                    } else {
+                        pit_env_point[chl] = 0;
+                    }
+                } else {
+                    vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
                 }
             }
         }
         audio_stereo_32_t buftmp = {0, 0};
         for (uint16_t chl = 0; chl < maxChannel; chl++) {
             audio_stereo_32_t tmp = {0, 0};
-            tmp = make_sound(now_freq[chl], note_vol[chl], it_instrument[note_inst[chl]].GbV, 64, 1024, chl, note_samp[chl]);
+            tmp = make_sound(now_freq[chl], note_vol[chl], it_instrument[note_inst[chl]].GbV, 
+                it_instrument[note_inst[chl]].volEnv.Flg.EnvOn ? volEnvVal[chl] : 64, 1024, chl, note_samp[chl]);
             buftmp.l += tmp.l *2;
             buftmp.r += tmp.r *2;
         }
@@ -404,12 +493,16 @@ void playTask(void *arg) {
 void displayTask(void *arg) {
     for (;;) {
         display.clearDisplay();
+        for (uint8_t i = 0; i < 64; i++) {
+            display.drawFastVLine(i*2, 0, FV_SHOW[i], 1);
+            display.drawFastVLine((i*2)+1, 0, FV_SHOW[i], 1);
+        }
         // for (uint8_t i = 0; i < 64; i++) {
         //     display.drawFastHLine(0, i, now_vol[i], 1);
         // }
-        for (uint8_t i = 0; i < 127; i++) {
-            display.drawPixel(i, 31 + (audioBuffer[i<<3].l >> 26), 1);
-            display.drawPixel(i, 31 + (audioBuffer[i<<3].r >> 26), 1);
+        for (uint8_t i = 36; i < 127; i++) {
+            display.drawPixel(i, 31 + (audioBuffer[i<<2].l >> 23), 1);
+            display.drawPixel(i, 31 + (audioBuffer[i<<2].r >> 23), 1);
         }
         display.display();
         vTaskDelay(1);
@@ -449,6 +542,9 @@ void mainTask(void *arg) {
     terminal.begin(115200, "ESP32Tracker DEBUG");
     terminal.addCommand("reboot", reboot_cmd);
     terminal.addCommand("get_track", get_track);
+    terminal.addCommand("play_smp", play_samp_cmd);
+    terminal.addCommand("get_env", get_env_cmd);
+    terminal.addCommand("get_env_itp", get_env_itp_cmd);
     terminal.addCommand("get_free_heap", get_free_heap_cmd);
     terminal.addCommand("start_play", start_play_cmd);
     terminal.addCommand("get_c5_speed", get_c5_speed_cmd);
@@ -456,7 +552,7 @@ void mainTask(void *arg) {
     terminal.addCommand("play_smp", play_samp_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
-    FILE *file = fopen("/spiffs/fod_splice_slice.it", "rb");
+    FILE *file = fopen("/spiffs/fod_ohcimadethisforyou.it", "rb");
 
     // Read Header
     display.clearDisplay();
@@ -523,7 +619,7 @@ void mainTask(void *arg) {
     }
     printf("%d\n", sizeof(it_instrument_t));
     fclose(file);
-    // xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
+    xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
 
     for (;;) {
         terminal.update();

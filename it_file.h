@@ -165,7 +165,7 @@ typedef struct __attribute__((packed)) {
     uint8_t MPr; // MIDI Program (Instrument)
     uint16_t MIDIBnk; // what is this??
     note_to_samp_table_t noteToSampTable[120];
-    it_inst_uenvelope_t volEnv;
+    it_inst_envelope_t volEnv;
     it_inst_envelope_t panEnv;
     it_inst_envelope_t pitEnv;
     uint8_t wastedByte[7];
@@ -199,7 +199,7 @@ typedef struct __attribute__((packed)) {
     uint8_t ViD; // Vibrato Depth, ranges from 0->64
     vibrato_waveform_t ViR; // Vibrato waveform type.
     uint8_t ViT; // Vibrato Rate, rate at which vibrato is applied (0->64)
-    uint32_t speedTable[128];
+    float speedTable[128];
     void *sample_data;
 } it_sample_t;
 
