@@ -61,4 +61,37 @@ void midi_note_to_string(uint8_t midi_note, char result[4]) {
     result[3] = '\0';
 }
 
+void volCmdToRel(uint8_t val, char *flg, uint8_t *rel_val) {
+    *flg = 'v';
+    if (val > 64 && val < 75) {
+        *flg = 'a';
+        val -= 65;
+    } else if (val > 74 && val < 85) {
+        *flg = 'b';
+        val -= 75;
+    } else if (val > 84 && val < 95) {
+        *flg = 'c';
+        val -= 85;
+    } else if (val > 94 && val < 105) {
+        *flg = 'd';
+        val -= 95;
+    } else if (val > 104 && val < 115) {
+        *flg = 'e';
+        val -= 105;
+    } else if (val > 114 && val < 125) {
+        *flg = 'f';
+        val -= 115;
+    } else if (val > 127 && val < 193) {
+        *flg = 'p';
+        val -= 128;
+    } else if (val > 192 && val < 203) {
+        *flg = 'g';
+        val -= 193;
+    } else if (val > 202 && val < 213) {
+        *flg = 'h';
+        val -= 203;
+    }
+    *rel_val = val;
+}
+
 #endif

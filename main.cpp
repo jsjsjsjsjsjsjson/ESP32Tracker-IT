@@ -51,39 +51,6 @@ uint8_t volNode[MAX_CHANNELS] = {0};
 
 uint16_t maxChannel = 0;
 
-void volCmdToRel(uint8_t val, char *flg, uint8_t *rel_val) {
-    *flg = 'v';
-    if (val > 64 && val < 75) {
-        *flg = 'a';
-        val -= 65;
-    } else if (val > 74 && val < 85) {
-        *flg = 'b';
-        val -= 75;
-    } else if (val > 84 && val < 95) {
-        *flg = 'c';
-        val -= 85;
-    } else if (val > 94 && val < 105) {
-        *flg = 'd';
-        val -= 95;
-    } else if (val > 104 && val < 115) {
-        *flg = 'e';
-        val -= 105;
-    } else if (val > 114 && val < 125) {
-        *flg = 'f';
-        val -= 115;
-    } else if (val > 127 && val < 193) {
-        *flg = 'p';
-        val -= 128;
-    } else if (val > 192 && val < 203) {
-        *flg = 'g';
-        val -= 193;
-    } else if (val > 202 && val < 213) {
-        *flg = 'h';
-        val -= 203;
-    }
-    *rel_val = val;
-}
-
 void get_track(int argc, const char* argv[]) {
     if (argc < 6) {
         printf("%s <Pat> <ChlStart> <ChlEnd> <RowStart> <RowEnd>\n", argv[0]);
@@ -181,18 +148,19 @@ void get_heap_stat(int argc, const char* argv[]) {
 */
 
 typedef enum __attribute__((packed)) {
-    NOTE_OFF,
+    NOTE_NOACTV,
     NOTE_ON,
-    NOTE_CONT
+    NOTE_OFF,
+    NOTE_OCCUPI
 } note_stat_t;
 
 note_stat_t note_stat[MAX_CHANNELS];
 uint8_t note_vol[MAX_CHANNELS];
 uint8_t note_env_vol[MAX_CHANNELS];
-uint16_t note_fade_comp[MAX_CHANNELS];
 uint8_t now_note[MAX_CHANNELS];
 float now_freq[MAX_CHANNELS];
 uint8_t note_samp[MAX_CHANNELS];
+int16_t note_fade_comp[MAX_CHANNELS];
 uint8_t note_inst[MAX_CHANNELS];
 uint8_t note_efct0[MAX_CHANNELS];
 uint8_t note_efct1[MAX_CHANNELS];
@@ -203,13 +171,16 @@ uint16_t pit_env_point[MAX_CHANNELS] = {0};
 
 uint8_t FV_SHOW[MAX_CHANNELS] = {0};
 
+uint8_t TicksRow;
+uint16_t TempoTickMax;
+
 float frac_index[MAX_CHANNELS];
 uint32_t int_index[MAX_CHANNELS];
 
 // 这个make_sound实现非常非常慢，希望好心人能优化一下
 IRAM_ATTR audio_stereo_32_t make_sound(float freq, uint8_t vol, uint8_t instVol, uint8_t volEnvVal, uint16_t noteFadeComp, uint8_t chl, uint16_t smp_num) {
     audio_stereo_32_t result = {0, 0};
-    if ((note_stat[chl] == NOTE_OFF || vol == 0 || instVol == 0 || volEnvVal == 0 || noteFadeComp == 0)
+    if ((note_stat[chl] == NOTE_NOACTV || vol == 0 || instVol == 0 || volEnvVal == 0 || noteFadeComp == 0)
         || (it_samples[smp_num].sample_data == NULL)) {
         // printf("CHL%02d: GlobalVol %d, note_stat %d, ChannelVol %d, vol %d, instVol %d, noteFadeComp %d, sampleVol %d\n", chl, GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl);
         return result;
@@ -229,11 +200,12 @@ IRAM_ATTR audio_stereo_32_t make_sound(float freq, uint8_t vol, uint8_t instVol,
     }
 
     if (sample->Flg.useLoop || sample->Flg.pingPongLoop) {
-        if (int_index[chl] > sample->LoopEnd) {
+        if (int_index[chl] >= sample->LoopEnd) {
             int_index[chl] = sample->LoopBegin;
+            frac_index[chl] = 0;
         }
     } else if (int_index[chl] > sample->Length) {
-        note_stat[chl] = NOTE_OFF;
+        note_stat[chl] = NOTE_NOACTV;
         return result;
     }
 
@@ -309,8 +281,12 @@ void pause_serial() {
 
 void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
     if (!instNum) return;
+    if (note_stat[chl] != NOTE_NOACTV) {
+        // for (uint8_t i = 0; i < )
+    }
     instNum -= 1;
     vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
+    note_fade_comp[chl] = 1024;
     volNode[chl] = 0;
     now_note[chl] = note;
     note_stat[chl] = NOTE_ON;
@@ -328,6 +304,7 @@ void setInst(uint8_t chl, uint8_t instNum, bool reset) {
     if (!instNum) return;
     instNum -= 1;
     vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
+    note_fade_comp[chl] = 1024;
     volNode[chl] = 0;
     uint8_t note = now_note[chl];
     note_stat[chl] = NOTE_ON;
@@ -353,12 +330,66 @@ void setVolVal(uint8_t chl, uint8_t volVal, bool reset) {
     }
 }
 
+void refrush_note(uint8_t chl) {
+    if (note_stat[chl] == NOTE_ON || note_stat[chl] == NOTE_OFF) {
+        bool enbVolEnv = it_instrument[note_inst[chl]].volEnv.Flg.EnvOn;
+        bool enbPanEnv = it_instrument[note_inst[chl]].panEnv.Flg.EnvOn;
+        bool enbPitEnv = it_instrument[note_inst[chl]].pitEnv.Flg.EnvOn;
+        uint8_t volEnvPointNum = it_instrument[note_inst[chl]].volEnv.Num;
+        uint8_t PanEnvPointNum = it_instrument[note_inst[chl]].panEnv.Num;
+        uint8_t PitEnvPointNum = it_instrument[note_inst[chl]].pitEnv.Num;
+        if (enbVolEnv) {
+            vol_env_point[chl]++;
+            if (vol_env_point[chl] >= it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].tick) {
+                volNode[chl]++;
+                if (it_instrument[note_inst[chl]].volEnv.Flg.LoopOn) {
+                    if (volNode[chl] > it_instrument[note_inst[chl]].volEnv.LpE - 1) {
+                        volNode[chl] = it_instrument[note_inst[chl]].volEnv.LpB;
+                        vol_env_point[chl] = it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]].tick;
+                    }
+                } else {
+                    if (volNode[chl] > it_instrument[note_inst[chl]].volEnv.Num - 2) {
+                        volNode[chl] = it_instrument[note_inst[chl]].volEnv.Num - 2;
+                        note_stat[chl] = NOTE_OFF;
+                        vol_env_point[chl]--;
+                    }
+                }
+            }
+            volEnvVal[chl] = LINEAR_INTERP(it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]].tick,
+                                            it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].tick,
+                                                it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]].y,
+                                                    it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].y, vol_env_point[chl]);
+        } else {
+            vol_env_point[chl] = 0;
+        }
+        if (enbPanEnv) {
+            pan_env_point[chl]++;
+        } else {
+            pan_env_point[chl] = 0;
+        }
+        if (enbPitEnv) {
+            pit_env_point[chl]++;
+        } else {
+            pit_env_point[chl] = 0;
+        }
+        if (note_stat[chl] == NOTE_OFF) {
+            note_fade_comp[chl] -= it_instrument[note_inst[chl]].FadeOut;
+            if (note_fade_comp[chl] < 0) {
+                note_fade_comp[chl] = 0;
+                note_stat[chl] = NOTE_NOACTV;
+            }
+        }
+    } else {
+        vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
+    }
+}
+
 void playTask(void *arg) {
     size_t writed;
     printf("Initialisation....\n");
-    uint16_t TempoTickMax = TEMPO_TO_TICKS(it_header.IT, SMP_RATE);
+    TempoTickMax = TEMPO_TO_TICKS(it_header.IT, SMP_RATE);
     printf("TempoTickMax: %d\n", TempoTickMax);
-    uint8_t TicksRow = it_header.IS;
+    TicksRow = it_header.IS;
     printf("TicksRow: %d\n", TicksRow);
     uint16_t bufferIndex = 0;
     int16_t tracker_rows = 0;
@@ -372,7 +403,7 @@ void playTask(void *arg) {
     memset(note_vol, 0, sizeof(note_vol));
     memset(note_samp, 0, sizeof(note_samp));
     memset(note_inst, 0, sizeof(note_inst));
-    // memset(note_fade_comp, 1024, sizeof(note_fade_comp));
+    memset(note_fade_comp, 1024, sizeof(note_fade_comp));
     printf("Readly...\n");
     // pause_serial();
     for (;;) {
@@ -389,7 +420,7 @@ void playTask(void *arg) {
                             startNote(chl, noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
                         else {
                             printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
-                            note_stat[chl] = NOTE_CONT;
+                            note_stat[chl] = NOTE_OFF;
                         }
                     }
                     if (GET_INSTRUMENT(mask)) {
@@ -430,50 +461,14 @@ void playTask(void *arg) {
                 }
             }
             for (uint8_t chl = 0; chl < maxChannel; chl++) {
-                if (note_stat[chl] == NOTE_ON) {
-                    bool enbVolEnv = it_instrument[note_inst[chl]].volEnv.Flg.EnvOn;
-                    bool enbPanEnv = it_instrument[note_inst[chl]].panEnv.Flg.EnvOn;
-                    bool enbPitEnv = it_instrument[note_inst[chl]].pitEnv.Flg.EnvOn;
-                    uint8_t volEnvPointNum = it_instrument[note_inst[chl]].volEnv.Num;
-                    uint8_t PanEnvPointNum = it_instrument[note_inst[chl]].panEnv.Num;
-                    uint8_t PitEnvPointNum = it_instrument[note_inst[chl]].pitEnv.Num;
-                    if (enbVolEnv) {
-                        vol_env_point[chl]++;
-                        if (vol_env_point[chl] >= it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].tick) {
-                            volNode[chl]++;
-                            if (volNode[chl] > it_instrument[note_inst[chl]].volEnv.Num - 2) {
-                                volNode[chl] = it_instrument[note_inst[chl]].volEnv.Num - 2;
-                                note_stat[chl] = NOTE_CONT;
-                                vol_env_point[chl]--;
-                            }
-                        }
-                        volEnvVal[chl] = LINEAR_INTERP(it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]].tick,
-                                                        it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].tick,
-                                                            it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]].y,
-                                                                it_instrument[note_inst[chl]].volEnv.envelope[volNode[chl]+1].y, vol_env_point[chl]);
-                    } else {
-                        vol_env_point[chl] = 0;
-                    }
-                    if (enbPanEnv) {
-                        pan_env_point[chl]++;
-                    } else {
-                        pan_env_point[chl] = 0;
-                    }
-                    if (enbPitEnv) {
-                        pit_env_point[chl]++;
-                    } else {
-                        pit_env_point[chl] = 0;
-                    }
-                } else {
-                    vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
-                }
+                refrush_note(chl);
             }
         }
         audio_stereo_32_t buftmp = {0, 0};
         for (uint16_t chl = 0; chl < maxChannel; chl++) {
             audio_stereo_32_t tmp = {0, 0};
             tmp = make_sound(now_freq[chl], note_vol[chl], it_instrument[note_inst[chl]].GbV, 
-                it_instrument[note_inst[chl]].volEnv.Flg.EnvOn ? volEnvVal[chl] : 64, 1024, chl, note_samp[chl]);
+                it_instrument[note_inst[chl]].volEnv.Flg.EnvOn ? volEnvVal[chl] : 64, note_fade_comp[chl], chl, note_samp[chl]);
             buftmp.l += tmp.l *2;
             buftmp.r += tmp.r *2;
         }
@@ -531,6 +526,12 @@ void get_speed_table_cmd(int argc, const char* argv[]) {
     }
 }
 
+void set_ticksrow_cmd(int argc, const char* argv[]) {
+    if (argc < 2) {printf("set_ticksrow <num>\n"); return;}
+    TicksRow = strtol(argv[1], NULL, 0);
+    printf("TicksRow set to %d\n", TicksRow);
+}
+
 void mainTask(void *arg) {
     SerialTerminal terminal;
     SPI.begin(17, -1, 16);
@@ -550,9 +551,10 @@ void mainTask(void *arg) {
     terminal.addCommand("get_c5_speed", get_c5_speed_cmd);
     terminal.addCommand("get_speed_table", get_speed_table_cmd);
     terminal.addCommand("play_smp", play_samp_cmd);
+    terminal.addCommand("set_ticksrow", set_ticksrow_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
-    FILE *file = fopen("/spiffs/fod_ohcimadethisforyou.it", "rb");
+    FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
 
     // Read Header
     display.clearDisplay();
