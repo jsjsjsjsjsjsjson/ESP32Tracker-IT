@@ -148,11 +148,16 @@ void get_heap_stat(int argc, const char* argv[]) {
 */
 
 typedef enum __attribute__((packed)) {
-    NOTE_NOACTV,
-    NOTE_ON,
-    NOTE_OFF,
-    NOTE_OCCUPI
+    NOTE_NOACTV, // 通道没有任何活动（FV == 0）
+    NOTE_ON, // 通道正在播放
+    NOTE_OFF, // 通道关闭中
+    NOTE_OCCUPI, // 通道被占用
+    NOTE_MAPING // 通道被映射到虚拟通道
+    // 当这个通道被未完成note占用时被分配到的通道将被设置为此状态
+    // 在任何设置函数中在读取到这个标志时都会访问映射表将效果器等应用到虚拟通道
 } note_stat_t;
+
+uint8_t note_mapper[MAX_CHANNELS]; // 通道映射表
 
 note_stat_t note_stat[MAX_CHANNELS];
 uint8_t note_vol[MAX_CHANNELS];
@@ -281,9 +286,6 @@ void pause_serial() {
 
 void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
     if (!instNum) return;
-    if (note_stat[chl] != NOTE_NOACTV) {
-        // for (uint8_t i = 0; i < )
-    }
     instNum -= 1;
     vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
     note_fade_comp[chl] = 1024;
@@ -377,6 +379,7 @@ void refrush_note(uint8_t chl) {
             if (note_fade_comp[chl] < 0) {
                 note_fade_comp[chl] = 0;
                 note_stat[chl] = NOTE_NOACTV;
+                note_mapper[chl] = 0;
             }
         }
     } else {
@@ -532,6 +535,20 @@ void set_ticksrow_cmd(int argc, const char* argv[]) {
     printf("TicksRow set to %d\n", TicksRow);
 }
 
+void debug_note_stat_cmd(int argc, const char* argv[]) {
+    for (;;) {
+        for (uint8_t i = 0; i < MAX_CHANNELS; i++) {
+            printf("%d", note_stat[i]);
+        }
+        printf("\n");
+        vTaskDelay(2);
+        if (Serial.available()) {
+            Serial.read();
+            break;
+        }
+    }
+}
+
 void mainTask(void *arg) {
     SerialTerminal terminal;
     SPI.begin(17, -1, 16);
@@ -552,6 +569,7 @@ void mainTask(void *arg) {
     terminal.addCommand("get_speed_table", get_speed_table_cmd);
     terminal.addCommand("play_smp", play_samp_cmd);
     terminal.addCommand("set_ticksrow", set_ticksrow_cmd);
+    terminal.addCommand("debug_note_stat", debug_note_stat_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
     FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
