@@ -179,6 +179,8 @@ uint8_t FV_SHOW[MAX_CHANNELS] = {0};
 uint8_t TicksRow;
 uint16_t TempoTickMax;
 
+uint8_t actvChan = 0;
+
 float frac_index[MAX_CHANNELS];
 uint32_t int_index[MAX_CHANNELS];
 
@@ -283,7 +285,7 @@ void pause_serial() {
     while(!Serial.available()) {vTaskDelay(16);}
     Serial.read();
 }
-
+/*
 void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
     if (!instNum) return;
     instNum -= 1;
@@ -291,7 +293,8 @@ void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
     note_fade_comp[chl] = 1024;
     volNode[chl] = 0;
     now_note[chl] = note;
-    note_stat[chl] = NOTE_ON;
+    if (note_stat[chl] != NOTE_MAPING) note_stat[chl] = NOTE_ON;
+
     note_inst[chl] = instNum;
     note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
     now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
@@ -301,7 +304,38 @@ void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
         frac_index[chl] = 0;
     }
 }
+*/
 
+void startNote(uint8_t chl_rel, uint8_t note, uint8_t instNum, bool reset) {
+    if (!instNum) return;
+    for (uint8_t chl = 0; chl < MAX_CHANNELS; chl++) {
+        if (chl == chl_rel) {
+            note_stat[chl] == NOTE_OFF;
+            actvChan--;
+        }
+        if (note_stat[chl] == NOTE_NOACTV) {
+            actvChan++;
+            instNum -= 1;
+            vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
+            note_fade_comp[chl] = 1024;
+            volNode[chl] = 0;
+            now_note[chl] = note;
+            if (note_stat[chl] != NOTE_MAPING) note_stat[chl] = NOTE_ON;
+
+            note_inst[chl] = instNum;
+            note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
+            now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
+            note_vol[chl] = it_samples[note_samp[chl]].Vol;
+            if (reset) {
+                int_index[chl] = 0;
+                frac_index[chl] = 0;
+            }
+            note_mapper[chl] = chl_rel;
+            break;
+        }
+    }
+}
+/*
 void setInst(uint8_t chl, uint8_t instNum, bool reset) {
     if (!instNum) return;
     instNum -= 1;
@@ -309,7 +343,7 @@ void setInst(uint8_t chl, uint8_t instNum, bool reset) {
     note_fade_comp[chl] = 1024;
     volNode[chl] = 0;
     uint8_t note = now_note[chl];
-    note_stat[chl] = NOTE_ON;
+    if (note_stat[chl] != NOTE_MAPING) note_stat[chl] = NOTE_ON;
     note_inst[chl] = instNum;
     note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
     now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
@@ -319,21 +353,53 @@ void setInst(uint8_t chl, uint8_t instNum, bool reset) {
         frac_index[chl] = 0;
     }
 }
+*/
+void setInst(uint8_t chl_rel, uint8_t instNum, bool reset) {
+    for (uint8_t chl = 0; chl < MAX_CHANNELS; chl++) {
+        uint8_t note = now_note[chl];
+        if (note_stat[chl] == NOTE_NOACTV) {
+            actvChan++;
+            instNum -= 1;
+            vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
+            note_fade_comp[chl] = 1024;
+            volNode[chl] = 0;
+            now_note[chl] = note;
+            if (note_stat[chl] != NOTE_MAPING) note_stat[chl] = NOTE_ON;
 
-void setVolVal(uint8_t chl, uint8_t volVal, bool reset) {
+            note_inst[chl] = instNum;
+            note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
+            now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
+            note_vol[chl] = it_samples[note_samp[chl]].Vol;
+            if (reset) {
+                int_index[chl] = 0;
+                frac_index[chl] = 0;
+            }
+            note_mapper[chl] = chl_rel;
+            break;
+        }
+    }
+}
+void setVolVal(uint8_t chl_rel, uint8_t volVal, bool reset) {
     char flg;
     uint8_t relVal;
-    volCmdToRel(volVal, &flg, &relVal);
-    if (flg == 'v')
-        note_vol[chl] = relVal;
-    if (reset) {
-        int_index[chl] = 0;
-        frac_index[chl] = 0;
+    for (uint8_t chl = 0; chl < MAX_CHANNELS; chl++) {
+        if (chl_rel == note_mapper[chl]) {
+            if (note_stat[chl] == NOTE_MAPING) {
+                chl = note_mapper[chl];
+            }
+            volCmdToRel(volVal, &flg, &relVal);
+            if (flg == 'v')
+                note_vol[chl] = relVal;
+            if (reset) {
+                int_index[chl] = 0;
+                frac_index[chl] = 0;
+            }
+        }
     }
 }
 
 void refrush_note(uint8_t chl) {
-    if (note_stat[chl] == NOTE_ON || note_stat[chl] == NOTE_OFF) {
+    if (note_stat[chl] != NOTE_NOACTV) {
         bool enbVolEnv = it_instrument[note_inst[chl]].volEnv.Flg.EnvOn;
         bool enbPanEnv = it_instrument[note_inst[chl]].panEnv.Flg.EnvOn;
         bool enbPitEnv = it_instrument[note_inst[chl]].pitEnv.Flg.EnvOn;
@@ -374,12 +440,13 @@ void refrush_note(uint8_t chl) {
         } else {
             pit_env_point[chl] = 0;
         }
+        chl = note_mapper[chl];
         if (note_stat[chl] == NOTE_OFF) {
             note_fade_comp[chl] -= it_instrument[note_inst[chl]].FadeOut;
             if (note_fade_comp[chl] < 0) {
                 note_fade_comp[chl] = 0;
                 note_stat[chl] = NOTE_NOACTV;
-                note_mapper[chl] = 0;
+                actvChan--;
             }
         }
     } else {
@@ -463,7 +530,7 @@ void playTask(void *arg) {
                     printf("skip to %d -> %d\n", tracker_ords, tracker_pats);
                 }
             }
-            for (uint8_t chl = 0; chl < maxChannel; chl++) {
+            for (uint8_t chl = 0; chl < MAX_CHANNELS; chl++) {
                 refrush_note(chl);
             }
         }
@@ -549,6 +616,31 @@ void debug_note_stat_cmd(int argc, const char* argv[]) {
     }
 }
 
+void debug_note_map_cmd(int argc, const char* argv[]) {
+    for (;;) {
+        for (uint8_t i = 0; i < MAX_CHANNELS; i++) {
+            printf("%d", note_mapper[i]);
+        }
+        printf("\n");
+        vTaskDelay(2);
+        if (Serial.available()) {
+            Serial.read();
+            break;
+        }
+    }
+}
+
+void debug_actv_cmd(int argc, const char* argv[]) {
+    for (;;) {
+        printf("%d\n", actvChan);
+        vTaskDelay(2);
+        if (Serial.available()) {
+            Serial.read();
+            break;
+        }
+    }
+}
+
 void mainTask(void *arg) {
     SerialTerminal terminal;
     SPI.begin(17, -1, 16);
@@ -570,6 +662,8 @@ void mainTask(void *arg) {
     terminal.addCommand("play_smp", play_samp_cmd);
     terminal.addCommand("set_ticksrow", set_ticksrow_cmd);
     terminal.addCommand("debug_note_stat", debug_note_stat_cmd);
+    terminal.addCommand("debug_note_map", debug_note_map_cmd);
+    terminal.addCommand("debug_actv", debug_actv_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
     FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
