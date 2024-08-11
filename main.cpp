@@ -285,7 +285,7 @@ void pause_serial() {
     while(!Serial.available()) {vTaskDelay(16);}
     Serial.read();
 }
-/*
+
 void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
     if (!instNum) return;
     instNum -= 1;
@@ -304,38 +304,7 @@ void startNote(uint8_t chl, uint8_t note, uint8_t instNum, bool reset) {
         frac_index[chl] = 0;
     }
 }
-*/
 
-void startNote(uint8_t chl_rel, uint8_t note, uint8_t instNum, bool reset) {
-    if (!instNum) return;
-    for (uint8_t chl = 0; chl < MAX_CHANNELS; chl++) {
-        if (chl == chl_rel) {
-            note_stat[chl] == NOTE_OFF;
-            actvChan--;
-        }
-        if (note_stat[chl] == NOTE_NOACTV) {
-            actvChan++;
-            instNum -= 1;
-            vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
-            note_fade_comp[chl] = 1024;
-            volNode[chl] = 0;
-            now_note[chl] = note;
-            if (note_stat[chl] != NOTE_MAPING) note_stat[chl] = NOTE_ON;
-
-            note_inst[chl] = instNum;
-            note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
-            now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
-            note_vol[chl] = it_samples[note_samp[chl]].Vol;
-            if (reset) {
-                int_index[chl] = 0;
-                frac_index[chl] = 0;
-            }
-            note_mapper[chl] = chl_rel;
-            break;
-        }
-    }
-}
-/*
 void setInst(uint8_t chl, uint8_t instNum, bool reset) {
     if (!instNum) return;
     instNum -= 1;
@@ -353,48 +322,16 @@ void setInst(uint8_t chl, uint8_t instNum, bool reset) {
         frac_index[chl] = 0;
     }
 }
-*/
-void setInst(uint8_t chl_rel, uint8_t instNum, bool reset) {
-    for (uint8_t chl = 0; chl < MAX_CHANNELS; chl++) {
-        uint8_t note = now_note[chl];
-        if (note_stat[chl] == NOTE_NOACTV) {
-            actvChan++;
-            instNum -= 1;
-            vol_env_point[chl] = pan_env_point[chl] = pit_env_point[chl] = 0;
-            note_fade_comp[chl] = 1024;
-            volNode[chl] = 0;
-            now_note[chl] = note;
-            if (note_stat[chl] != NOTE_MAPING) note_stat[chl] = NOTE_ON;
 
-            note_inst[chl] = instNum;
-            note_samp[chl] = it_instrument[instNum].noteToSampTable[note].sample - 1;
-            now_freq[chl] = it_samples[note_samp[chl]].speedTable[note];
-            note_vol[chl] = it_samples[note_samp[chl]].Vol;
-            if (reset) {
-                int_index[chl] = 0;
-                frac_index[chl] = 0;
-            }
-            note_mapper[chl] = chl_rel;
-            break;
-        }
-    }
-}
-void setVolVal(uint8_t chl_rel, uint8_t volVal, bool reset) {
+void setVolVal(uint8_t chl, uint8_t volVal, bool reset) {
     char flg;
     uint8_t relVal;
-    for (uint8_t chl = 0; chl < MAX_CHANNELS; chl++) {
-        if (chl_rel == note_mapper[chl]) {
-            if (note_stat[chl] == NOTE_MAPING) {
-                chl = note_mapper[chl];
-            }
-            volCmdToRel(volVal, &flg, &relVal);
-            if (flg == 'v')
-                note_vol[chl] = relVal;
-            if (reset) {
-                int_index[chl] = 0;
-                frac_index[chl] = 0;
-            }
-        }
+    volCmdToRel(volVal, &flg, &relVal);
+    if (flg == 'v')
+        note_vol[chl] = relVal;
+    if (reset) {
+        int_index[chl] = 0;
+        frac_index[chl] = 0;
     }
 }
 
