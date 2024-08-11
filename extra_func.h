@@ -19,7 +19,9 @@
 #define GET_COMMAND(mask) ((mask) & 8 || (mask) & 128)
 
 #define LINEAR_INTERP(x1, x2, y1, y2, x) \
-    ((y1) + ((y2) - (y1)) * ((x) - (x1)) / ((x2) - (x1)))
+    (((x2) - (x1)) != 0 ? \
+    ((y1) + ((y2) - (y1)) * ((x) - (x1)) / ((x2) - (x1))) : 0)  // 或者其他你认为合适的值或处理
+
 
 
 uint16_t findMax(uint16_t arr[], uint16_t size) {
