@@ -1,6 +1,5 @@
 #include "it_file.h"
 #include "audio_struct.h"
-#include <esp_attr.h>
 #include "it_config.h"
 #include "extra_func.h"
 
@@ -12,10 +11,6 @@ typedef enum __attribute__((packed)) {
     NOTE_NOACTV, // 通道没有任何活动（FV == 0）
     NOTE_ON, // 通道正在播放
     NOTE_OFF, // 通道关闭中
-    NOTE_OCCUPI, // 通道被占用
-    NOTE_MAPING // 通道被映射到虚拟通道
-    // 当这个通道被未完成note占用时被分配到的通道将被设置为此状态
-    // 在任何设置函数中在读取到这个标志时都会访问映射表将效果器等应用到虚拟通道
 } note_stat_t;
 
 class Channel {
