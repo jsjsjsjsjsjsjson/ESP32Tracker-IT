@@ -13,8 +13,7 @@ typedef enum __attribute__((packed)) {
     NOTE_OFF, // 通道关闭中
 } note_stat_t;
 
-class Channel {
-public:    
+typedef struct {
     note_stat_t note_stat;
     uint8_t note;
     uint8_t note_vol;
@@ -27,8 +26,6 @@ public:
     uint8_t volNode;
     uint8_t panNode;
     uint8_t pitNode;
-    uint8_t ChannelVol;
-    uint8_t ChannelPan;
     float note_freq;
     float frac_index;
     uint32_t int_index;
@@ -36,8 +33,15 @@ public:
     uint16_t vol_env_point;
     uint16_t pan_env_point;
     uint16_t pit_env_point;
+} chl_stat_t;
 
+class Channel {
+public:
+    std::vector<chl_stat_t> chl_stat;
+    uint8_t ChannelVol;
+    uint8_t ChannelPan;
     uint8_t FV_SHOW;
+    chl_stat.pop_back();
 
     audio_stereo_32_t make_sound() {
         audio_stereo_32_t result = {0, 0};
