@@ -11,6 +11,7 @@ typedef enum __attribute__((packed)) {
     NOTE_NOACTV, // 通道没有任何活动（FV == 0）
     NOTE_ON, // 通道正在播放
     NOTE_OFF, // 通道关闭中
+    NOTE_FADE // 通道渐出中
 } note_stat_t;
 
 typedef struct {
@@ -49,12 +50,12 @@ public:
         audio_stereo_32_t result_sum = {0, 0};
         for (uint8_t i = 0; i < chl_stat.size(); i++) {
             audio_stereo_32_t result = {0, 0};
-            if ((chl_stat[i].note_stat == NOTE_NOACTV
+            if (/*(chl_stat[i].note_stat == NOTE_NOACTV
                 || chl_stat[i].note_vol == 0
                 || chl_stat[i].inst_vol == 0
                 || chl_stat[i].volEnvVal == 0
                 || chl_stat[i].note_fade_comp == 0)
-                || (it_samples[chl_stat[i].note_samp].sample_data == NULL)) {
+                || */(it_samples[chl_stat[i].note_samp].sample_data == NULL)) {
                 // printf("CHL%02d: GlobalVol %d, note_stat %d, ChannelVol %d, vol %d, instVol %d, noteFadeComp %d, sampleVol %d\n", chl, GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl);
                 return result;
             }
@@ -119,85 +120,35 @@ public:
         return result_sum;
     }
 
-    void setInst(uint8_t instNum, bool reset) {
-        if (!instNum) return;
-        instNum -= 1;
-        chl_inst = instNum;
-        if (!chl_stat.empty()) {
-            chl_stat_t *tmp = &chl_stat.back();
-            tmp->vol_env_point = tmp->pan_env_point = tmp->pit_env_point = 0;
-            tmp->volNode = tmp->panNode = tmp->pitNode = 0;
-            tmp->note_fade_comp = 1024;
-            tmp->note_stat = NOTE_ON;
-            tmp->note_inst = instNum;
-            tmp->inst_vol = it_instrument[instNum].GbV;
-            tmp->note_samp = it_instrument[instNum].noteToSampTable[tmp->note].sample - 1;
-            tmp->note_freq = it_samples[tmp->note_samp].speedTable[tmp->note];
-            tmp->note_vol = it_samples[tmp->note_samp].Vol;
-            if (reset) {
-                tmp->int_index = 0;
-                tmp->frac_index = 0;
-            }
-        } else {
-            startNote(chl_note, instNum+1, true);
-        }
-    }
-
     void startNote(uint8_t note_in, uint8_t instNum, bool reset) {
         if (!instNum) return;
-        instNum -= 1;
         chl_stat_t tmp;
-        if (it_instrument[instNum].NNA != NNA_CUT) {
-            tmp.vol_env_point = tmp.pan_env_point = tmp.pit_env_point = 0;
-            tmp.volNode = tmp.panNode = tmp.pitNode = 0;
-            tmp.note_fade_comp = 1024;
-            tmp.note = note_in;
-            tmp.note_stat = NOTE_ON;
-            tmp.note_inst = instNum;
-            tmp.inst_vol = it_instrument[instNum].GbV;
-            tmp.note_samp = it_instrument[instNum].noteToSampTable[tmp.note].sample - 1;
-            tmp.note_freq = it_samples[tmp.note_samp].speedTable[tmp.note];
-            tmp.note_vol = it_samples[tmp.note_samp].Vol;
-            chl_stat.push_back(tmp);
-        } else {
-            tmp.vol_env_point = tmp.pan_env_point = tmp.pit_env_point = 0;
-            tmp.volNode = tmp.panNode = tmp.pitNode = 0;
-            tmp.note_fade_comp = 1024;
-            tmp.note = note_in;
-            tmp.note_stat = NOTE_ON;
-            tmp.note_inst = instNum;
-            tmp.inst_vol = it_instrument[instNum].GbV;
-            tmp.note_samp = it_instrument[instNum].noteToSampTable[tmp.note].sample - 1;
-            tmp.note_freq = it_samples[tmp.note_samp].speedTable[tmp.note];
-            tmp.note_vol = it_samples[tmp.note_samp].Vol;
-            if (chl_stat.empty()) {
-                chl_stat.push_back(tmp);
-            } else {
-                chl_stat[0] = tmp;
-            }
-        }
-        if (reset) {
-            chl_stat.back().int_index = 0;
-            chl_stat.back().frac_index = 0;
-        }
+        instNum --;
+    }
+
+    void setInst(uint8_t instNum, bool reset) {
+        if (!instNum) return;
+
     }
 
     void offNote() {
-        chl_stat.back().note_stat = NOTE_OFF;
+
+    }
+
+    void fadeNote() {
+
+    }
+
+    void cutNote() {
+
+    }
+
+    void clearBeginNote() {
+
     }
 
     void setVolVal(uint8_t volVal, bool reset) {
-        char flg;
-        uint8_t relVal;
-        volCmdToRel(volVal, &flg, &relVal);
-        if (chl_stat.empty()) {
-            if (flg == 'v')
-                chl_stat.back().note_vol = relVal;
-        }
-        if (reset) {
-            chl_stat.back().int_index = 0;
-            chl_stat.back().frac_index = 0;
-        }
+
     }
 
     void setChanVol(uint8_t vol) {
@@ -205,58 +156,6 @@ public:
     }
 
     void refrush_note() {
-        
-        if (note_stat != NOTE_NOACTV) {
-            bool enbVolEnv = it_instrument[note_inst].volEnv.Flg.EnvOn;
-            bool enbPanEnv = it_instrument[note_inst].panEnv.Flg.EnvOn;
-            bool enbPitEnv = it_instrument[note_inst].pitEnv.Flg.EnvOn;
-            uint8_t volEnvPointNum = it_instrument[note_inst].volEnv.Num;
-            uint8_t PanEnvPointNum = it_instrument[note_inst].panEnv.Num;
-            uint8_t PitEnvPointNum = it_instrument[note_inst].pitEnv.Num;
-            if (enbVolEnv) {
-                vol_env_point++;
-                if (vol_env_point >= it_instrument[note_inst].volEnv.envelope[volNode+1].tick) {
-                    volNode++;
-                    if (it_instrument[note_inst].volEnv.Flg.LoopOn) {
-                        if (volNode > it_instrument[note_inst].volEnv.LpE - 1) {
-                            volNode = it_instrument[note_inst].volEnv.LpB;
-                            vol_env_point = it_instrument[note_inst].volEnv.envelope[volNode].tick;
-                        }
-                    } else {
-                        if (volNode > it_instrument[note_inst].volEnv.Num - 2) {
-                            volNode = it_instrument[note_inst].volEnv.Num - 2;
-                            note_stat = NOTE_OFF;
-                            vol_env_point--;
-                        }
-                    }
-                }
-                volEnvVal = LINEAR_INTERP(it_instrument[note_inst].volEnv.envelope[volNode].tick,
-                                                it_instrument[note_inst].volEnv.envelope[volNode+1].tick,
-                                                    it_instrument[note_inst].volEnv.envelope[volNode].y,
-                                                        it_instrument[note_inst].volEnv.envelope[volNode+1].y, vol_env_point);
-            } else {
-                vol_env_point = 0;
-            }
-            if (enbPanEnv) {
-                pan_env_point++;
-            } else {
-                pan_env_point = 0;
-            }
-            if (enbPitEnv) {
-                pit_env_point++;
-            } else {
-                pit_env_point = 0;
-            }
-            if (note_stat == NOTE_OFF) {
-                note_fade_comp -= it_instrument[note_inst].FadeOut;
-                if (note_fade_comp < 0) {
-                    note_fade_comp = 0;
-                    note_stat = NOTE_NOACTV;
-                }
-            }
-        } else {
-            vol_env_point = pan_env_point = pit_env_point = 0;
-            volNode = panNode = pitNode = 0;
-        }
+
     }
 };

@@ -18,6 +18,10 @@
 #define GET_VOLUME(mask)  ((mask) & 4 || (mask) & 64)
 #define GET_COMMAND(mask) ((mask) & 8 || (mask) & 128)
 
+#define hexToDecimalTens(num) (((num) >> 4) & 0x0F)
+#define hexToDecimalOnes(num) ((num) & 0x0F)
+#define hexToRow(num) (hexToDecimalTens(num) * 10 + hexToDecimalOnes(num))
+
 #define LINEAR_INTERP(x1, x2, y1, y2, x) \
     (((x2) - (x1)) != 0 ? \
     ((y1) + ((y2) - (y1)) * ((x) - (x1)) / ((x2) - (x1))) : 0)  // 或者其他你认为合适的值或处理

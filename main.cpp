@@ -222,6 +222,8 @@ void playTask(void *arg) {
     uint8_t tracker_pats = it_header.Orders[tracker_ords];
     uint32_t tempo_tick = 0;
     uint32_t tick = 0;
+    bool enbVolSild = false;
+    uint8_t volSild = 0;
     printf("Readly...\n");
     channels = new Channel[maxChannel];
     xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
@@ -242,11 +244,13 @@ void playTask(void *arg) {
                         uint8_t noteTmp = unpack_data[tracker_pats][chl][tracker_rows].note;
                         if (noteTmp < 120) {
                             channels[chl].startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
-                            printf("CHL%02d ROW%03d: NOTE ON %d %d\n", chl, tracker_rows, channels[chl].note, channels[chl].note_inst);
-                        }
-                        else {
-                            printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
-                            channels[chl].offNote();
+                            // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, channels[chl].chl_note, channels[chl].chl_inst);
+                        } else if (noteTmp == 255) {
+                            // printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
+                            channels[chl].offBackNote();
+                            
+                        } else if (noteTmp == 254) {
+                            channels[chl].clearBeginNote();
                         }
                     }
                     if (GET_INSTRUMENT(mask)) {
@@ -258,12 +262,24 @@ void playTask(void *arg) {
                     if (GET_COMMAND(mask)) {
                         char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                         uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
+                        enbVolSild = false;
                         if (cmd == 'A') {
                             TicksRow = cmdVal;
                         } else if (cmd == 'M') {
                             channels[chl].setChanVol(cmdVal);
                         } else if (cmd == 'V') {
                             GlobalVol = cmdVal;
+                        } else if (cmd == 'D') {
+                            enbVolSild = true;
+                            if (cmdVal) {
+                                volSild = cmdVal;
+                            }
+                        } else if (cmd == 'S') {
+                            if (hexToDecimalTens(cmdVal) == 7) {
+                                channels[chl].chl_stat.clear();
+                            }
+                        } else {
+                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
                     }
                 }
@@ -288,6 +304,15 @@ void playTask(void *arg) {
             }
             for (uint8_t chl = 0; chl < maxChannel; chl++) {
                 channels[chl].refrush_note();
+                if (volSild) {
+                    if (!channels[chl].chl_stat.empty()) {
+                        if (hexToDecimalOnes(volSild)) {
+                            channels[chl].chl_stat.back().note_vol -= hexToDecimalOnes(volSild);
+                        } else if (hexToDecimalTens(volSild)) {
+                            channels[chl].chl_stat.back().note_vol += hexToDecimalTens(volSild);
+                        }
+                    }
+                }
                 // printf("INST_VOL[%d] = %d NOTE_STAT[%d] = %d\n", chl, channels[chl].inst_vol, chl, channels[chl].note_stat);
             }
         }
@@ -368,8 +393,10 @@ void debug_note_map_cmd(int argc, const char* argv[]) {
 }
 
 void debug_actv_cmd(int argc, const char* argv[]) {
+    if (argc < 2) {printf("%s <ChannelNum>\n", argv[0]);return;}
+    uint8_t chl = strtol(argv[1], NULL, 0);
     for (;;) {
-        printf("%d\n", actvChan);
+        printf("%d\n", channels[chl].chl_stat.size());
         vTaskDelay(2);
         if (Serial.available()) {
             Serial.read();
@@ -403,7 +430,8 @@ void mainTask(void *arg) {
     terminal.addCommand("debug_actv", debug_actv_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
-    FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
+    // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
+    FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
 
     // Read Header
     display.clearDisplay();
