@@ -205,6 +205,7 @@ public:
     }
 
     void refrush_note() {
+        
         if (note_stat != NOTE_NOACTV) {
             bool enbVolEnv = it_instrument[note_inst].volEnv.Flg.EnvOn;
             bool enbPanEnv = it_instrument[note_inst].panEnv.Flg.EnvOn;
