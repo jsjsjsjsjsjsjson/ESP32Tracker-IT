@@ -193,6 +193,9 @@ public:
     }
 
     void refrush_note() {
+        if (chl_stat.empty()) return;
+        printf("ACTV CHL: EMPTY=%d SIZE=%zu\n", chl_stat.empty(), chl_stat.size());
+        if (chl_stat.size() > 32) return;
         for (uint8_t i = 0; i < chl_stat.size(); i++) {
             chl_stat_t *tmp = &chl_stat[i];
             it_inst_envelope_t vol_env = it_instrument[tmp->note_inst].volEnv;

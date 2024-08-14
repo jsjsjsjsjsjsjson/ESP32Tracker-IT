@@ -40,6 +40,11 @@ pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
 
+uint8_t TicksRow;
+uint16_t TempoTickMax;
+
+uint8_t actvChan = 0;
+
 Channel* channels;
 
 uint8_t GlobalVol;
@@ -136,20 +141,98 @@ void reboot_cmd(int argc, const char* argv[]) {
     esp_restart();
 }
 
+void play_chl_cmd(int argc, const char* argv[]) {
+    if (argc < 3) {
+        printf("%s <PatNum> <Channel>\n", argv[0]);
+        return;
+    }
+    printf("Initialisation....\n");
+    TempoTickMax = TEMPO_TO_TICKS(it_header.IT, SMP_RATE);
+    printf("TempoTickMax: %d\n", TempoTickMax);
+    TicksRow = it_header.IS;
+    uint8_t tracker_pats = strtol(argv[1], NULL, 0);
+    uint8_t chl = strtol(argv[2], NULL, 0);
+    Channel testChl;
+    uint32_t tempo_tick = 0;
+    uint32_t tick = 0;
+    uint8_t tracker_rows = 0;
+    uint16_t bufPtr = 0;
+    size_t writed;
+    for (;;) {
+        tempo_tick++;
+        if (tempo_tick >= TempoTickMax) {
+            tempo_tick = 0;
+            tick++;
+            if (tick >= TicksRow) {
+                tick = 0;
+                // printf("ROW %03d\n", tracker_rows);
+                uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
+                if (GET_NOTE(mask)) {
+                    uint8_t noteTmp = unpack_data[tracker_pats][chl][tracker_rows].note;
+                    if (noteTmp < 120) {
+                        testChl.startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
+                        // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, testChl.chl_note, testChl.chl_inst);
+                    } else if (noteTmp == 255) {
+                        // printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
+                        testChl.fadeNote();
+                        
+                    } else if (noteTmp == 254) {
+                        testChl.cutNote();
+                    }
+                }
+                if (GET_INSTRUMENT(mask)) {
+                    testChl.setInst(unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
+                }
+                if (GET_VOLUME(mask)) {
+                    testChl.setVolVal(unpack_data[tracker_pats][chl][tracker_rows].volume, false);
+                }
+                if (GET_COMMAND(mask)) {
+                    char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
+                    uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
+                    if (cmd == 'A') {
+                        TicksRow = cmdVal;
+                    } else if (cmd == 'M') {
+                        testChl.setChanVol(cmdVal);
+                    } else if (cmd == 'V') {
+                        GlobalVol = cmdVal;
+                    } else if (cmd == 'D') {
+                        printf("Vol Sild %d\n", cmdVal);
+                    } else if (cmd == 'S') {
+                        if (hexToDecimalTens(cmdVal) == 7) {
+                            testChl.chl_stat.clear();
+                        }
+                    } else {
+                        printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                    }
+                }
+                tracker_rows++;
+                if (tracker_rows > maxRowTable[tracker_pats]) {
+                    break;
+                }
+            }
+            testChl.refrush_note();
+            if (!testChl.chl_stat.empty()) {
+                printf("ENV TICK %d NODE %d VAL %d\n", testChl.chl_stat.back().vol_env_tick, testChl.chl_stat.back().volNode, testChl.chl_stat.back().volEnvVal);
+            }
+        }
+        audioBuffer[bufPtr] = testChl.make_sound();
+        bufPtr++;
+        if (bufPtr > BUFF_SIZE) {
+            bufPtr = 0;
+            i2s_channel_write(i2s_tx_handle, audioBuffer, sizeof(audioBuffer), &writed, portMAX_DELAY);
+            printf("%d\n", writed);
+        }
+    }
+    memset(audioBuffer, 0, sizeof(audioBuffer));
+    testChl.chl_stat.clear();
+    i2s_channel_write(i2s_tx_handle, audioBuffer, sizeof(audioBuffer), &writed, portMAX_DELAY);
+}
+
 /*
 void get_heap_stat(int argc, const char* argv[]) {
     view_heap_status();
 }
 */
-
-
-uint8_t TicksRow;
-uint16_t TempoTickMax;
-
-uint8_t actvChan = 0;
-
-// 这个make_sound实现非常非常慢，希望好心人能优化一下
-
 
 void play_samp_cmd(int argc, const char* argv[]) {
     if (argc < 3) {
@@ -236,7 +319,7 @@ void playTask(void *arg) {
             tick++;
             if (tick >= TicksRow) {
                 tick = 0;
-                printf("ROW %03d\n", tracker_rows);
+                // printf("ROW %03d\n", tracker_rows);
                 for (uint16_t chl = 0; chl < maxChannel; chl++) {
                     uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
                     if (GET_NOTE(mask)) {
@@ -274,7 +357,7 @@ void playTask(void *arg) {
                                 channels[chl].chl_stat.clear();
                             }
                         } else {
-                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                            // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
                     }
                 }
@@ -298,6 +381,7 @@ void playTask(void *arg) {
                 }
             }
             for (uint8_t chl = 0; chl < maxChannel; chl++) {
+                // printf("NOW REFRUSH CHL %d\n", chl);
                 channels[chl].refrush_note();
                 // printf("INST_VOL[%d] = %d NOTE_STAT[%d] = %d\n", chl, channels[chl].inst_vol, chl, channels[chl].note_stat);
             }
@@ -381,12 +465,27 @@ void debug_note_map_cmd(int argc, const char* argv[]) {
 void debug_actv_cmd(int argc, const char* argv[]) {
     if (argc < 2) {printf("%s <ChannelNum>\n", argv[0]);return;}
     uint8_t chl = strtol(argv[1], NULL, 0);
-    for (;;) {
-        printf("%d\n", channels[chl].chl_stat.size());
-        vTaskDelay(2);
-        if (Serial.available()) {
-            Serial.read();
-            break;
+    if (chl == 255) {
+        for (;;) {
+            uint16_t sum = 0;
+            for (uint8_t i = 0; i < maxChannel; i++) {
+                sum += channels[i].chl_stat.size();
+            }
+            printf("ACTV NOTE: %d\n", sum);
+            if (Serial.available()) {
+                Serial.read();
+                break;
+            }
+            vTaskDelay(2);
+        }
+    } else {
+        for (;;) {
+            printf("%d\n", channels[chl].chl_stat.size());
+            if (Serial.available()) {
+                Serial.read();
+                break;
+            }
+            vTaskDelay(2);
         }
     }
 }
@@ -414,10 +513,11 @@ void mainTask(void *arg) {
     terminal.addCommand("debug_note_stat", debug_note_stat_cmd);
     terminal.addCommand("debug_note_map", debug_note_map_cmd);
     terminal.addCommand("debug_actv", debug_actv_cmd);
+    terminal.addCommand("play_chl", play_chl_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
-    // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
-    FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
+    FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
+    // FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
 
     // Read Header
     display.clearDisplay();
