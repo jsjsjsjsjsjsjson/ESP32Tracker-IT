@@ -18,7 +18,8 @@ typedef struct {
     note_stat_t note_stat;
     new_note_activ_t nna;
     uint8_t note;
-    uint8_t note_vol;
+    int8_t note_vol;
+    uint8_t note_pan;
     uint8_t note_inst;
     uint8_t note_samp;
     uint8_t note_efct0;
@@ -37,6 +38,17 @@ typedef struct {
     uint16_t pit_env_tick;
 } chl_stat_t;
 
+void applyPan(int32_t *left, int32_t *right, uint16_t pan) {
+    int32_t temp_left = *left;
+    int32_t temp_right = *right;
+    
+    if (pan < 32) {
+        *right = (int16_t)((temp_right * pan) >> 5);
+    } else if (pan > 32) {
+        *left = (int16_t)((temp_left * (64 - pan)) >> 5);
+    }
+}
+
 class Channel {
 public:
     std::vector<chl_stat_t> chl_stat;
@@ -45,6 +57,10 @@ public:
     uint8_t FV_SHOW;
     uint8_t chl_inst;
     uint8_t chl_note;
+
+    bool enbVolSild;
+    uint8_t volSildUpVar;
+    uint8_t volSildDownVar;
     // chl_stat.pop_back();
 
     audio_stereo_32_t make_sound() {
@@ -112,6 +128,7 @@ public:
             FV_SHOW = FV >> 4;
 
             // printf("GlobalVol: %d, note_stat: %d, ChannelVol: %d, vol: %d, instVol: %d, noteFadeComp %d, sampleVol: %d, FV: %d\n", GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl, FV);
+            applyPan(&result.l, &result.r, ((uint16_t)ChannelPan + (uint16_t)chl_stat[i].note_pan) >> 1);
             result.l *= FV;
             result.r *= FV;
 
@@ -142,6 +159,12 @@ public:
         tmp.note_freq = it_samples[tmp.note_samp].speedTable[tmp.note];
         tmp.note_vol = it_samples[tmp.note_samp].Vol;
         tmp.inst_vol = it_instrument[instNum].GbV;
+        tmp.note_pan = 32;
+        if (it_samples[tmp.note_samp].DfP & 128)
+            tmp.note_pan = it_samples[tmp.note_samp].DfP - 128;
+        if (!it_instrument[instNum].DfP & 128)
+            tmp.note_pan = it_instrument[instNum].DfP - 128;
+
         tmp.frac_index = 0, tmp.int_index = 0;
         tmp.volNode = 0, tmp.vol_env_tick = 0;
         if (chl_stat.empty()) {
@@ -161,31 +184,81 @@ public:
                 }
             }
         }
+        chl_note = note_in;
     }
 
     void setInst(uint8_t instNum, bool reset) {
         if (!instNum) return;
-
+        startNote(chl_note, instNum, 1);
     }
 
     void offNote() {
-        chl_stat.back().note_stat = NOTE_OFF;
+        if (it_instrument[chl_inst].NNA == NNA_CUT) {
+            if (!chl_stat.empty()) chl_stat.pop_back();
+        } else {
+            chl_stat.back().note_stat = NOTE_OFF;
+        }
     }
 
     void fadeNote() {
         chl_stat.back().note_stat = NOTE_FADE;
     }
 
+    void setVolSild(bool stat, uint8_t var) {
+        enbVolSild = stat;
+        if (stat && var) {
+            volSildUpVar = hexToDecimalTens(var);
+            volSildDownVar = hexToDecimalOnes(var);
+        }
+    }
+
+    void volSildDown(uint8_t val) {
+        if (chl_stat.empty()) {
+            printf("WARNING: SET A EMPTY CHL\n");
+        } else {
+            chl_stat.back().note_vol -= val;
+            if (chl_stat.back().note_vol < 0) {
+                chl_stat.back().note_vol = 0;
+            }
+        }
+    }
+
+    void volSildUp(uint8_t val) {
+        if (chl_stat.empty()) {
+            printf("WARNING: SET A EMPTY CHL\n");
+        } else {
+            chl_stat.back().note_vol += val;
+            if (chl_stat.back().note_vol > 64) {
+                chl_stat.back().note_vol = 64;
+            }
+        }
+    }
+
     void cutNote() {
-        chl_stat.pop_back();
+        if (chl_stat.empty()) {
+            printf("WARNING: CUT A EMPTY CHL\n");
+        } else {
+            chl_stat.pop_back();
+        }
     }
 
     void clearBeginNote(uint8_t index) {
-        chl_stat.erase(chl_stat.begin() + index);
+        if (chl_stat.empty()) {
+            printf("WARNING: CLEAR A EMPTY CHL\n");
+        } else {
+            chl_stat.erase(chl_stat.begin() + index);
+        }
     }
 
     void setVolVal(uint8_t volVal, bool reset) {
-
+        char flg;
+        uint8_t val;
+        volCmdToRel(volVal, &flg, &val);
+        if (flg == 'v') {
+            chl_stat.back().note_vol = val;
+        } else if (flg == 'p') {
+            chl_stat.back().note_pan = val;
+        }
     }
 
     void setChanVol(uint8_t vol) {
@@ -194,8 +267,7 @@ public:
 
     void refrush_note() {
         if (chl_stat.empty()) return;
-        printf("ACTV CHL: EMPTY=%d SIZE=%zu\n", chl_stat.empty(), chl_stat.size());
-        if (chl_stat.size() > 32) return;
+        // printf("ACTV CHL: EMPTY=%d SIZE=%zu\n", chl_stat.empty(), chl_stat.size());
         for (uint8_t i = 0; i < chl_stat.size(); i++) {
             chl_stat_t *tmp = &chl_stat[i];
             it_inst_envelope_t vol_env = it_instrument[tmp->note_inst].volEnv;
@@ -242,6 +314,14 @@ public:
                     printf("CHL CLEAR NOTE %d\n", i);
                 }
             }
+        }
+
+        // refrush Effect
+
+        if (volSildDownVar) {
+            volSildDown(volSildDownVar);
+        } else if (volSildUpVar) {
+            volSildUp(volSildUpVar);
         }
     }
 };

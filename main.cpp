@@ -9,6 +9,7 @@
 #include "channel.h"
 #include "vol_table.h"
 #include "it_config.h"
+#include "write_wav.h"
 
 Adafruit_SSD1306 display(128, 64, &SPI, 7, 15, 6, 10000000);
 
@@ -189,14 +190,17 @@ void play_chl_cmd(int argc, const char* argv[]) {
                 if (GET_COMMAND(mask)) {
                     char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                     uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
+                    channels[chl].setVolSild(false, 0);
                     if (cmd == 'A') {
                         TicksRow = cmdVal;
+                        tick = cmdVal;
                     } else if (cmd == 'M') {
                         testChl.setChanVol(cmdVal);
                     } else if (cmd == 'V') {
                         GlobalVol = cmdVal;
                     } else if (cmd == 'D') {
-                        printf("Vol Sild %d\n", cmdVal);
+                        // printf("Vol Sild %02X\n", cmdVal);
+                        channels[chl].setVolSild(true, cmdVal);
                     } else if (cmd == 'S') {
                         if (hexToDecimalTens(cmdVal) == 7) {
                             testChl.chl_stat.clear();
@@ -314,7 +318,7 @@ void playTask(void *arg) {
     }
     // pause_serial();
     for (;;) {
-        if (tempo_tick >= TempoTickMax) {
+        if (tempo_tick > TempoTickMax) {
             tempo_tick = 0;
             tick++;
             if (tick >= TicksRow) {
@@ -344,20 +348,23 @@ void playTask(void *arg) {
                     if (GET_COMMAND(mask)) {
                         char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                         uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
+                        channels[chl].setVolSild(false, 0);
                         if (cmd == 'A') {
                             TicksRow = cmdVal;
+                            // tick = cmdVal;
                         } else if (cmd == 'M') {
                             channels[chl].setChanVol(cmdVal);
                         } else if (cmd == 'V') {
                             GlobalVol = cmdVal;
                         } else if (cmd == 'D') {
-                            printf("Vol Sild %d\n", cmdVal);
+                            // printf("Vol Sild %02X\n", cmdVal);
+                            channels[chl].setVolSild(true, cmdVal);
                         } else if (cmd == 'S') {
                             if (hexToDecimalTens(cmdVal) == 7) {
                                 channels[chl].chl_stat.clear();
                             }
                         } else {
-                            // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
                     }
                 }
@@ -516,8 +523,9 @@ void mainTask(void *arg) {
     terminal.addCommand("play_chl", play_chl_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
-    FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
+    // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
     // FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
+    FILE *file = fopen("/spiffs/fod_nit.it", "rb");
 
     // Read Header
     display.clearDisplay();
