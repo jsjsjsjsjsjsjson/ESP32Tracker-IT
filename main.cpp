@@ -222,8 +222,6 @@ void playTask(void *arg) {
     uint8_t tracker_pats = it_header.Orders[tracker_ords];
     uint32_t tempo_tick = 0;
     uint32_t tick = 0;
-    bool enbVolSild = false;
-    uint8_t volSild = 0;
     printf("Readly...\n");
     channels = new Channel[maxChannel];
     xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
@@ -238,6 +236,7 @@ void playTask(void *arg) {
             tick++;
             if (tick >= TicksRow) {
                 tick = 0;
+                printf("ROW %03d\n", tracker_rows);
                 for (uint16_t chl = 0; chl < maxChannel; chl++) {
                     uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
                     if (GET_NOTE(mask)) {
@@ -247,10 +246,10 @@ void playTask(void *arg) {
                             // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, channels[chl].chl_note, channels[chl].chl_inst);
                         } else if (noteTmp == 255) {
                             // printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
-                            channels[chl].offBackNote();
+                            channels[chl].fadeNote();
                             
                         } else if (noteTmp == 254) {
-                            channels[chl].clearBeginNote();
+                            channels[chl].cutNote();
                         }
                     }
                     if (GET_INSTRUMENT(mask)) {
@@ -262,7 +261,6 @@ void playTask(void *arg) {
                     if (GET_COMMAND(mask)) {
                         char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                         uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
-                        enbVolSild = false;
                         if (cmd == 'A') {
                             TicksRow = cmdVal;
                         } else if (cmd == 'M') {
@@ -270,10 +268,7 @@ void playTask(void *arg) {
                         } else if (cmd == 'V') {
                             GlobalVol = cmdVal;
                         } else if (cmd == 'D') {
-                            enbVolSild = true;
-                            if (cmdVal) {
-                                volSild = cmdVal;
-                            }
+                            printf("Vol Sild %d\n", cmdVal);
                         } else if (cmd == 'S') {
                             if (hexToDecimalTens(cmdVal) == 7) {
                                 channels[chl].chl_stat.clear();
@@ -304,15 +299,6 @@ void playTask(void *arg) {
             }
             for (uint8_t chl = 0; chl < maxChannel; chl++) {
                 channels[chl].refrush_note();
-                if (volSild) {
-                    if (!channels[chl].chl_stat.empty()) {
-                        if (hexToDecimalOnes(volSild)) {
-                            channels[chl].chl_stat.back().note_vol -= hexToDecimalOnes(volSild);
-                        } else if (hexToDecimalTens(volSild)) {
-                            channels[chl].chl_stat.back().note_vol += hexToDecimalTens(volSild);
-                        }
-                    }
-                }
                 // printf("INST_VOL[%d] = %d NOTE_STAT[%d] = %d\n", chl, channels[chl].inst_vol, chl, channels[chl].note_stat);
             }
         }
@@ -443,25 +429,25 @@ void mainTask(void *arg) {
 
     pause_serial();
     // Read Instrument
-    it_instrument = (it_instrument_t*)malloc(it_header.InsNum * sizeof(it_instrument_t));
+    it_instrument = (it_instrument_t*)malloc((it_header.InsNum + 1) * sizeof(it_instrument_t));
     for (uint16_t inst = 0; inst < it_header.InsNum; inst++) {
         display.clearDisplay();
         display.setCursor(0, 0);
-        display.printf("Read Header...");
+        display.printf("Instrument #%d...\n", inst+1);
         display.display();
-        printf("Reading Instrument #%d...\n", inst);
-        read_it_inst(file, it_header.InstOfst[inst], &it_instrument[inst]);
+        printf("Reading Instrument #%d...\n", inst+1);
+        read_it_inst(file, it_header.InstOfst[inst], &it_instrument[inst+1]);
     }
 
     // Read Samples
-    it_samples = (it_sample_t*)malloc(it_header.SmpNum * sizeof(it_sample_t));
+    it_samples = (it_sample_t*)malloc((it_header.SmpNum + 1) * sizeof(it_sample_t));
     for (uint16_t smp = 0; smp < it_header.SmpNum; smp++) {
         display.clearDisplay();
         display.setCursor(0, 0);
-        display.printf("Reading Sample #%d...", smp);
+        display.printf("Reading Sample #%d...", smp+1);
         display.display();
-        printf("Reading Sample #%d...\n", smp);
-        read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp]);
+        printf("Reading Sample #%d...\n", smp+1);
+        read_it_sample(file, it_header.SampHeadOfst[smp], &it_samples[smp+1]);
     }
 
     // Read Pattern

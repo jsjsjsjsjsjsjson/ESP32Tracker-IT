@@ -16,6 +16,7 @@ typedef enum __attribute__((packed)) {
 
 typedef struct {
     note_stat_t note_stat;
+    new_note_activ_t nna;
     uint8_t note;
     uint8_t note_vol;
     uint8_t note_inst;
@@ -31,9 +32,9 @@ typedef struct {
     float frac_index;
     uint32_t int_index;
     int16_t note_fade_comp;
-    uint16_t vol_env_point;
-    uint16_t pan_env_point;
-    uint16_t pit_env_point;
+    uint16_t vol_env_tick;
+    uint16_t pan_env_tick;
+    uint16_t pit_env_tick;
 } chl_stat_t;
 
 class Channel {
@@ -123,7 +124,43 @@ public:
     void startNote(uint8_t note_in, uint8_t instNum, bool reset) {
         if (!instNum) return;
         chl_stat_t tmp;
-        instNum --;
+        new_note_activ_t last_nna;
+        if (!chl_stat.empty()) {
+            if (chl_stat.back().note_inst) {
+                last_nna = it_instrument[chl_stat.back().note_inst].NNA;
+            } else {
+                last_nna = NNA_CUT;
+            }
+        } else {
+            last_nna = NNA_CUT;
+        }
+        tmp.note_stat = NOTE_ON;
+        tmp.note = note_in;
+        tmp.note_fade_comp = 1024;
+        tmp.note_inst = instNum;
+        tmp.note_samp = it_instrument[instNum].noteToSampTable[tmp.note].sample;
+        tmp.note_freq = it_samples[tmp.note_samp].speedTable[tmp.note];
+        tmp.note_vol = it_samples[tmp.note_samp].Vol;
+        tmp.inst_vol = it_instrument[instNum].GbV;
+        tmp.frac_index = 0, tmp.int_index = 0;
+        tmp.volNode = 0, tmp.vol_env_tick = 0;
+        if (chl_stat.empty()) {
+            chl_stat.push_back(tmp);
+        } else {
+            if (last_nna == NNA_CUT) {
+                chl_stat.back() = tmp;
+            } else {
+                if (last_nna == NNA_CONTINUE) {
+                    chl_stat.push_back(tmp);
+                } else if (last_nna == NNA_NOTEFADE) {
+                    chl_stat.back().note_stat = NOTE_FADE;
+                    chl_stat.push_back(tmp);
+                } else if (last_nna == NNA_NOTEOFF) {
+                    chl_stat.back().note_stat = NOTE_OFF;
+                    chl_stat.push_back(tmp);
+                }
+            }
+        }
     }
 
     void setInst(uint8_t instNum, bool reset) {
@@ -132,19 +169,19 @@ public:
     }
 
     void offNote() {
-
+        chl_stat.back().note_stat = NOTE_OFF;
     }
 
     void fadeNote() {
-
+        chl_stat.back().note_stat = NOTE_FADE;
     }
 
     void cutNote() {
-
+        chl_stat.pop_back();
     }
 
-    void clearBeginNote() {
-
+    void clearBeginNote(uint8_t index) {
+        chl_stat.erase(chl_stat.begin() + index);
     }
 
     void setVolVal(uint8_t volVal, bool reset) {
@@ -156,6 +193,52 @@ public:
     }
 
     void refrush_note() {
-
+        for (uint8_t i = 0; i < chl_stat.size(); i++) {
+            chl_stat_t *tmp = &chl_stat[i];
+            it_inst_envelope_t vol_env = it_instrument[tmp->note_inst].volEnv;
+            if (vol_env.Flg.EnvOn) {
+                if (vol_env.Flg.LoopOn) {
+                    tmp->vol_env_tick++;
+                    if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
+                        tmp->vol_env_tick = 0;
+                        tmp->volNode++;
+                        if (tmp->volNode >= vol_env.LpE) {
+                            tmp->volNode = vol_env.LpB;
+                            tmp->vol_env_tick = vol_env.envelope[vol_env.LpB].tick;
+                        }
+                    }
+                    // tmp->volEnvVal = 64;
+                    tmp->volEnvVal = LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
+                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick);
+                } else {
+                    tmp->vol_env_tick++;
+                    if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
+                        tmp->volNode++;
+                        if (tmp->volNode >= vol_env.Num - 1) {
+                            tmp->volNode--;
+                            tmp->vol_env_tick--;
+                            tmp->note_stat = NOTE_OFF;
+                        } else {
+                            tmp->vol_env_tick = 0;
+                        }
+                    }
+                    tmp->volEnvVal = LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
+                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick);
+                }
+            } else {
+                tmp->volEnvVal = 64;
+            }
+            if (tmp->note_stat == NOTE_OFF || tmp->note_stat == NOTE_FADE) {
+                // printf("NOTE FADE COMP %d - %d = ", tmp->note_fade_comp, it_instrument[tmp->note_inst].FadeOut);
+                tmp->note_fade_comp -= it_instrument[tmp->note_inst].FadeOut;
+                // printf("%d\n", tmp->note_fade_comp);
+                if (tmp->note_fade_comp < 0) {
+                    tmp->note_fade_comp = 0;
+                    tmp->note_stat = NOTE_NOACTV;
+                    clearBeginNote(i);
+                    printf("CHL CLEAR NOTE %d\n", i);
+                }
+            }
+        }
     }
 };
