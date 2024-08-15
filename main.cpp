@@ -190,7 +190,7 @@ void play_chl_cmd(int argc, const char* argv[]) {
                 if (GET_COMMAND(mask)) {
                     char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                     uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
-                    channels[chl].setVolSild(false, 0);
+                    testChl.setVolSild(false, 0);
                     if (cmd == 'A') {
                         TicksRow = cmdVal;
                         tick = cmdVal;
@@ -200,7 +200,7 @@ void play_chl_cmd(int argc, const char* argv[]) {
                         GlobalVol = cmdVal;
                     } else if (cmd == 'D') {
                         // printf("Vol Sild %02X\n", cmdVal);
-                        channels[chl].setVolSild(true, cmdVal);
+                        testChl.setVolSild(true, cmdVal);
                     } else if (cmd == 'S') {
                         if (hexToDecimalTens(cmdVal) == 7) {
                             testChl.chl_stat.clear();
@@ -364,7 +364,7 @@ void playTask(void *arg) {
                                 channels[chl].chl_stat.clear();
                             }
                         } else {
-                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                            // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
                     }
                 }
@@ -415,7 +415,7 @@ void playTask(void *arg) {
 
 void start_play_cmd(int argc, const char* argv[]) {
     printf("Starting PlayTask...\n");
-    xTaskCreate(playTask, "PLAYTASK", 10240, NULL, 6, NULL);
+    xTaskCreate(playTask, "PLAYTASK", 8192, NULL, 10, NULL);
 }
 
 void get_c5_speed_cmd(int argc, const char* argv[]) {
@@ -525,7 +525,7 @@ void mainTask(void *arg) {
     // Open File
     // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
     // FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
-    FILE *file = fopen("/spiffs/fod_nit.it", "rb");
+    FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
 
     // Read Header
     display.clearDisplay();

@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include "extra_func.h"
 #include "audio_struct.h"
+#include "decode_sample.h"
 
 typedef struct {
     bool stereo : 1;
@@ -446,11 +447,21 @@ void read_it_inst(FILE *file, uint32_t offset, it_instrument_t *inst) {
 }
 
 void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
-    printf("Reading Sample Header in 0x%x\n", offset);
-    fseek(file, offset, SEEK_SET);
-    printf("File Jmp To 0x%x\n", ftell(file));
+    printf("Reading Sample Header at 0x%x\n", offset);
+
+    // Seek to the specified offset in the file
+    if (fseek(file, offset, SEEK_SET) != 0) {
+        printf("Error seeking to 0x%x: %s\n", offset, strerror(errno));
+        return;
+    }
+    printf("File Jumped To 0x%x\n", ftell(file));
+
+    // Read the sample header
     printf("Reading header...\n");
-    fread(sample, 80, 1, file);
+    if (fread(sample, sizeof(it_sample_t), 1, file) != 1) {
+        printf("Error reading sample header: %s\n", strerror(errno));
+        return;
+    }
     printf("IMPS: %.4s\n", sample->IMPS);
     printf("DOSFilename: %.12s\n", sample->DOSFilename);
     printf("Reserved: 0x%x\n", sample->Reserved);
@@ -481,69 +492,123 @@ void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {
     printf("ViD: 0x%x\n", sample->ViD);
     printf("ViR: 0x%x\n", sample->ViR);
     printf("ViT: 0x%x\n", sample->ViT);
+
+    // Skip processing if the sample length is 0
     if (sample->Length == 0) {
         printf("This Sample is NULL, Skip!\n");
         return;
     }
-    // printf("sample_data: 0x%p\n", sample->sample_data);
-    printf("Sample Data in 0x%x\n", sample->SamplePointer);
-    fseek(file, sample->SamplePointer, SEEK_SET);
+
+    // Calculate the sample's size in bytes
     uint32_t sampRelSizeByte;
     if (sample->Flg.stereo) {
-        if (sample->Flg.use16Bit)
-            sampRelSizeByte = sample->Length * sizeof(audio_stereo_16_t);
-        else
-            sampRelSizeByte = sample->Length * sizeof(audio_stereo_8_t);
+        sampRelSizeByte = sample->Length * (sample->Flg.use16Bit ? sizeof(audio_stereo_16_t) : sizeof(audio_stereo_8_t));
     } else {
-        if (sample->Flg.use16Bit)
-            sampRelSizeByte = sample->Length * sizeof(audio_mono_16_t);
-        else
-            sampRelSizeByte = sample->Length * sizeof(audio_mono_8_t);
+        sampRelSizeByte = sample->Length * (sample->Flg.use16Bit ? sizeof(audio_mono_16_t) : sizeof(audio_mono_8_t));
     }
     printf("Sample Rel Byte is %d\n", sampRelSizeByte);
-    printf("malloc mem\n");
+
+    // Allocate memory for the sample data
     sample->sample_data = malloc(sampRelSizeByte);
     if (sample->sample_data == NULL) {
-        printf("malloc failed!!\n");
+        printf("Memory allocation failed for sample data!!\n");
         printf("Because: %s\n", strerror(errno));
-        printf("free heap size: %d\n", esp_get_free_heap_size());
-        for (;;) {
-            vTaskDelay(32);
+        return;
+    }
+
+    // Allocate temporary memory to read data
+    void *tmp = malloc(sampRelSizeByte);
+    if (tmp == NULL) {
+        printf("Memory allocation failed for temporary buffer!!\n");
+        printf("Because: %s\n", strerror(errno));
+        free(sample->sample_data);
+        return;
+    }
+
+    // Seek to the sample data pointer
+    if (fseek(file, sample->SamplePointer, SEEK_SET) != 0) {
+        printf("Error seeking to sample data: %s\n", strerror(errno));
+        free(sample->sample_data);
+        free(tmp);
+        return;
+    }
+    printf("File Jumped To 0x%x\n", ftell(file));
+
+    // Read and process the sample data
+    if (sample->Flg.comprsSamp) {
+        printf("Compressed Sample! Decompressing...\n");
+        uint16_t length;
+        if (fread(&length, sizeof(uint16_t), 1, file) != 1) {
+            printf("Error reading compressed length: %s\n", strerror(errno));
+            free(sample->sample_data);
+            free(tmp);
+            return;
+        }
+        printf("Compressed Length: %d Bytes\n", length);
+
+        void *decode_tmp = malloc(length);
+        if (decode_tmp == NULL) {
+            printf("Memory allocation failed for decompression buffer!!\n");
+            printf("Because: %s\n", strerror(errno));
+            free(sample->sample_data);
+            free(tmp);
+            return;
+        }
+
+        if (fread(decode_tmp, length, 1, file) != 1) {
+            printf("Error reading compressed sample data: %s\n", strerror(errno));
+            free(sample->sample_data);
+            free(tmp);
+            free(decode_tmp);
+            return;
+        }
+
+        decode_sample(decode_tmp, length, tmp, sample->Cvt.sampIsDPCM);
+        free(decode_tmp);
+        printf("Decompression Finished!\n");
+    } else {
+        if (fread(tmp, sampRelSizeByte, 1, file) != 1) {
+            printf("Error reading sample data: %s\n", strerror(errno));
+            free(sample->sample_data);
+            free(tmp);
+            return;
         }
     }
-    printf("File Jmp To 0x%x\n", ftell(file));
-    printf("reading data...\n");
+
+    // Handle stereo samples
     if (sample->Flg.stereo) {
-        printf("This is a Srereo Sample, Converting...\n");
-        void *tmp = malloc(sampRelSizeByte);
-        fread(tmp, sampRelSizeByte, 1, file);
+        printf("This is a Stereo Sample, Converting...\n");
         uint32_t dataSize = sampRelSizeByte / 2;
-        printf("%d = %d / 2\n", dataSize, sampRelSizeByte);
         if (sample->Flg.use16Bit) {
             uint32_t sampSize = dataSize / 2;
             audio_stereo_16_t *tmp16 = (audio_stereo_16_t*)sample->sample_data;
             int16_t *vtmp16 = (int16_t*)tmp;
             for (uint32_t i = 0; i < sampSize; i++) {
                 tmp16[i].l = vtmp16[i];
-                tmp16[i].r = vtmp16[i+sampSize];
+                tmp16[i].r = vtmp16[i + sampSize];
             }
         } else {
             audio_stereo_8_t *tmp8 = (audio_stereo_8_t*)sample->sample_data;
             int8_t *vtmp8 = (int8_t*)tmp;
             for (uint32_t i = 0; i < dataSize; i++) {
                 tmp8[i].l = vtmp8[i];
-                tmp8[i].r = vtmp8[i+dataSize];
+                tmp8[i].r = vtmp8[i + dataSize];
             }
         }
-        free(tmp);
     } else {
-        fread(sample->sample_data, sampRelSizeByte, 1, file);
+        memcpy(sample->sample_data, tmp, sampRelSizeByte);
     }
-    printf("read finish!\n\n");
-    printf("Generate frequency tables...\n");
+
+    // Free the temporary buffer
+    free(tmp);
+
+    printf("Sample read finished!\n");
+
+    // Generate frequency tables
+    printf("Generating frequency tables...\n");
     printf("C5->A4 = %f\n", sample->C5Speed * powf(2.0f, -9.0f / 12.0f));
     convert_c5speed(sample->C5Speed, sample->speedTable);
-    printf("Generate Success\n");
+    printf("Frequency tables generated successfully\n");
 }
 
 #endif // IT_FILE_H

@@ -91,8 +91,8 @@ public:
 
             if (sample->Flg.useLoop || sample->Flg.pingPongLoop) {
                 if (chl_stat[i].int_index >= sample->LoopEnd) {
-                    chl_stat[i].int_index = sample->LoopBegin;
-                    chl_stat[i].frac_index = 0;
+                    chl_stat[i].int_index -= (sample->LoopEnd - sample->LoopBegin);
+                    // chl_stat[i].frac_index = 0;
                 }
             } else if (chl_stat[i].int_index > sample->Length) {
                 chl_stat[i].note_stat = NOTE_NOACTV;
@@ -251,13 +251,17 @@ public:
     }
 
     void setVolVal(uint8_t volVal, bool reset) {
-        char flg;
-        uint8_t val;
-        volCmdToRel(volVal, &flg, &val);
-        if (flg == 'v') {
-            chl_stat.back().note_vol = val;
-        } else if (flg == 'p') {
-            chl_stat.back().note_pan = val;
+        if (chl_stat.empty()) {
+            printf("WARNING: SET A EMPTY CHL\n");
+        } else {
+            char flg;
+            uint8_t val;
+            volCmdToRel(volVal, &flg, &val);
+            if (flg == 'v') {
+                chl_stat.back().note_vol = val;
+            } else if (flg == 'p') {
+                chl_stat.back().note_pan = val;
+            }
         }
     }
 
@@ -269,49 +273,93 @@ public:
         if (chl_stat.empty()) return;
         // printf("ACTV CHL: EMPTY=%d SIZE=%zu\n", chl_stat.empty(), chl_stat.size());
         for (uint8_t i = 0; i < chl_stat.size(); i++) {
+            if (chl_stat[i].note_stat == NOTE_NOACTV) {
+                clearBeginNote(i);
+                continue;
+            }
             chl_stat_t *tmp = &chl_stat[i];
             it_inst_envelope_t vol_env = it_instrument[tmp->note_inst].volEnv;
             if (vol_env.Flg.EnvOn) {
                 if (vol_env.Flg.LoopOn) {
                     tmp->vol_env_tick++;
-                    if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
-                        tmp->vol_env_tick = 0;
-                        tmp->volNode++;
-                        if (tmp->volNode >= vol_env.LpE) {
+                    if (vol_env.Flg.SusLoopOn && tmp->note_stat == NOTE_ON) {
+                        if (vol_env.SLB == vol_env.SLE) {
+                            tmp->volNode = vol_env.SLB;
+                            tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
+                        }
+                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
+                            tmp->vol_env_tick = 0;
+                            tmp->volNode++;
+                            if (tmp->volNode >= vol_env.SLE) {
+                                tmp->volNode = vol_env.SLB;
+                                tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
+                            }
+                        }
+                    } else {
+                        if (vol_env.LpB == vol_env.LpE) {
                             tmp->volNode = vol_env.LpB;
                             tmp->vol_env_tick = vol_env.envelope[vol_env.LpB].tick;
                         }
-                    }
-                    // tmp->volEnvVal = 64;
-                    tmp->volEnvVal = LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
-                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick);
-                } else {
-                    tmp->vol_env_tick++;
-                    if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
-                        tmp->volNode++;
-                        if (tmp->volNode >= vol_env.Num - 1) {
-                            tmp->volNode--;
-                            tmp->vol_env_tick--;
-                            tmp->note_stat = NOTE_OFF;
-                        } else {
-                            tmp->vol_env_tick = 0;
+                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
+                            // tmp->vol_env_tick = 0;
+                            tmp->volNode++;
+                            if (tmp->volNode >= vol_env.LpE) {
+                                tmp->volNode = vol_env.LpB;
+                                tmp->vol_env_tick = vol_env.envelope[vol_env.LpB].tick;
+                            }
                         }
                     }
-                    tmp->volEnvVal = LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
-                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick);
+                    // tmp->volEnvVal = 64;
+                    tmp->volEnvVal = abs(LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
+                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick));
+                } else {
+                    tmp->vol_env_tick++;
+                    if (vol_env.Flg.SusLoopOn && tmp->note_stat == NOTE_ON) {
+                        if (vol_env.SLB == vol_env.SLE) {
+                            tmp->volNode = vol_env.SLB;
+                            tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
+                        }
+                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
+                            tmp->vol_env_tick = 0;
+                            tmp->volNode++;
+                            if (tmp->volNode >= vol_env.SLE) {
+                                tmp->volNode = vol_env.SLB;
+                                tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
+                            }
+                        }
+                    } else {
+                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
+                            tmp->volNode++;
+                            if (tmp->volNode >= vol_env.Num - 2) {
+                                tmp->volNode--;
+                                tmp->vol_env_tick--;
+                                tmp->note_stat = NOTE_OFF;
+                            } else {
+                                tmp->vol_env_tick = 0;
+                            }
+                        }
+                    }
+                    tmp->volEnvVal = abs(LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
+                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick));
                 }
             } else {
                 tmp->volEnvVal = 64;
             }
             if (tmp->note_stat == NOTE_OFF || tmp->note_stat == NOTE_FADE) {
-                // printf("NOTE FADE COMP %d - %d = ", tmp->note_fade_comp, it_instrument[tmp->note_inst].FadeOut);
-                tmp->note_fade_comp -= it_instrument[tmp->note_inst].FadeOut;
-                // printf("%d\n", tmp->note_fade_comp);
-                if (tmp->note_fade_comp < 0) {
+                if (it_instrument[tmp->note_inst].FadeOut) {
+                    // printf("NOTE FADE COMP %d - %d = ", tmp->note_fade_comp, it_instrument[tmp->note_inst].FadeOut);
+                    tmp->note_fade_comp -= it_instrument[tmp->note_inst].FadeOut;
+                    // printf("%d\n", tmp->note_fade_comp);
+                    if (tmp->note_fade_comp < 0) {
+                        tmp->note_fade_comp = 0;
+                        tmp->note_stat = NOTE_NOACTV;
+                        clearBeginNote(i);
+                        // printf("CHL CLEAR NOTE %d\n", i);
+                    }
+                } else {
                     tmp->note_fade_comp = 0;
                     tmp->note_stat = NOTE_NOACTV;
                     clearBeginNote(i);
-                    printf("CHL CLEAR NOTE %d\n", i);
                 }
             }
         }
