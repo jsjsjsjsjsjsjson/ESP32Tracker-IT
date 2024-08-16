@@ -22,6 +22,20 @@
 #define hexToDecimalOnes(num) ((num) & 0x0F)
 #define hexToRow(num) (hexToDecimalTens(num) * 10 + hexToDecimalOnes(num))
 
+#define PORTUP16(f, t) (f + ((f * t) >> 8))
+#define PORTUP64(f, t) (f + ((f * t) >> 10))
+
+#define PORTDOWN16(f, t) (f - ((f * t) >> 8))
+#define PORTDOWN64(f, t) (f - ((f * t) >> 10))
+
+uint32_t portToneG(uint32_t original_frequency, int32_t slide_units, uint8_t extra_fine) {
+    float freq = (float)original_frequency;
+    float semitone_per_unit = extra_fine ? 1.0f / 64.0f : 1.0f / 16.0f;
+    float semitone_change = slide_units * semitone_per_unit;
+    float new_freq = freq * powf(2.0f, semitone_change / 12.0f);
+    return (uint32_t)new_freq;
+}
+
 uint8_t COSINE_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t x) {
     if (x < x1) x = x1;
     if (x > x2) x = x2;
@@ -51,11 +65,11 @@ uint16_t findMax(uint16_t arr[], uint16_t size) {
     return max;
 }
 
-void convert_c5speed(uint32_t C5_Speed, float midi_frequencies[128]) {
+void convert_c5speed(uint32_t C5_Speed, uint32_t midi_frequencies[128]) {
     float semitone_ratio = powf(2.0f, 1.0f / 12.0f);
     float A4_frequency = C5_Speed / powf(semitone_ratio, -9);
     for (uint8_t i = 0; i < 128; ++i) {
-        midi_frequencies[i] = A4_frequency * powf(semitone_ratio, i - 69);
+        midi_frequencies[i] = roundf(A4_frequency * powf(semitone_ratio, i - 69));
     }
 }
 

@@ -30,7 +30,7 @@ typedef struct {
     uint8_t volNode;
     uint8_t panNode;
     uint8_t pitNode;
-    float note_freq;
+    uint32_t note_freq;
     float frac_index;
     uint32_t int_index;
     int16_t note_fade_comp;
@@ -39,7 +39,7 @@ typedef struct {
     uint16_t pit_env_tick;
 } chl_stat_t;
 
-void applyPan(int32_t *left, int32_t *right, uint16_t pan) {
+inline void applyPan(int32_t *left, int32_t *right, uint16_t pan) {
     int32_t temp_left = *left;
     int32_t temp_right = *right;
     
@@ -66,6 +66,10 @@ public:
     bool tonePort = false;
     uint8_t tonePortSource = 0;
     uint8_t tonePortTarget = 0;
+    uint8_t tonePortSpeed = 0;
+
+    bool toneUpSild = false;
+    uint8_t toneUpSildVar = 0;
     // chl_stat.pop_back();
 
     audio_stereo_32_t make_sound() {
@@ -90,7 +94,7 @@ public:
             int_index[chl] += frac_index[chl];
             frac_index[chl] &= 0xFFFF;
             */
-            chl_stat[i].frac_index += chl_stat[i].note_freq / SMP_RATE;
+            chl_stat[i].frac_index += chl_stat[i].note_freq / (float)SMP_RATE;
             if (chl_stat[i].frac_index >= 1.0f) {
                 chl_stat[i].int_index += (int)chl_stat[i].frac_index; // Increment the integer index by the whole part of frac_index
                 chl_stat[i].frac_index -= (int)chl_stat[i].frac_index; // Keep only the fractional part
@@ -193,19 +197,21 @@ public:
                 }
             }
         } else {
-            chl_stat_t* tmp = &chl_stat.back();
-            tmp->note_stat = NOTE_ON;
-            tmp->note = note_in;
-            tmp->note_fade_comp = 1024;
-            tmp->note_inst = instNum;
-            tmp->note_samp = it_instrument[instNum].noteToSampTable[tmp->note].sample;
-            tmp->note_vol = it_samples[tmp->note_samp].Vol;
-            tmp->inst_vol = it_instrument[instNum].GbV;
-            tmp->note_pan = 32;
-            if (it_samples[tmp->note_samp].DfP & 128)
-                tmp->note_pan = it_samples[tmp->note_samp].DfP - 128;
-            if (!it_instrument[instNum].DfP & 128)
-                tmp->note_pan = it_instrument[instNum].DfP - 128;
+            if (!chl_stat.empty()) {
+                chl_stat_t* tmp = &chl_stat.back();
+                // tmp->note_stat = NOTE_ON;
+                tmp->note = note_in;
+                // tmp->note_fade_comp = 1024;
+                tmp->note_inst = instNum;
+                tmp->note_samp = it_instrument[instNum].noteToSampTable[tmp->note].sample;
+                tmp->note_vol = it_samples[tmp->note_samp].Vol;
+                tmp->inst_vol = it_instrument[instNum].GbV;
+                tmp->note_pan = 32;
+                if (it_samples[tmp->note_samp].DfP & 128)
+                    tmp->note_pan = it_samples[tmp->note_samp].DfP - 128;
+                if (!it_instrument[instNum].DfP & 128)
+                    tmp->note_pan = it_instrument[instNum].DfP - 128;
+            }
         }
         chl_note = note_in;
     }
@@ -292,7 +298,27 @@ public:
         ChannelVol = vol;
     }
 
-    void refrush_note() {
+    void setPortTone(bool stat, uint8_t speed) {
+        tonePort = stat;
+        if (tonePortSpeed)
+            tonePortSpeed = speed;
+    }
+
+    void setPortSource(uint8_t note) {
+        tonePortSource = note;
+    }
+
+    void setToneUpSild(bool stat, uint8_t var) {
+        toneUpSild = stat;
+        if (var)
+            toneUpSildVar = var;
+    }
+
+    void setPortTarget(uint8_t note) {
+        tonePortTarget = note;
+    }
+
+    void refrush_note(uint32_t Gtick) {
         if (chl_stat.empty()) return;
         // printf("ACTV CHL: EMPTY=%d SIZE=%zu\n", chl_stat.empty(), chl_stat.size());
         for (uint8_t i = 0; i < chl_stat.size(); i++) {
@@ -350,11 +376,44 @@ public:
         }
 
         // refrush Effect
+        if (!Gtick) {
+            if (volSildDownVar) {
+                volSildDown(volSildDownVar);
+            } else if (volSildUpVar) {
+                volSildUp(volSildUpVar);
+            }
 
-        if (volSildDownVar) {
-            volSildDown(volSildDownVar);
-        } else if (volSildUpVar) {
-            volSildUp(volSildUpVar);
+            if (tonePort) {
+                if (!chl_stat.empty()) {
+                    uint32_t freq = chl_stat.back().note_freq;
+                    uint32_t sourceFreq = it_samples[chl_stat.back().note_samp].speedTable[tonePortSource];
+                    uint32_t targetFreq = it_samples[chl_stat.back().note_samp].speedTable[tonePortTarget];
+                    /*
+                    if (tonePortSource > tonePortTarget) {
+                        printf("TONEPORT-: SOURCE %d - %d = ", sourceFreq, (freq >> 8) * tonePortSpeed);
+                        if (freq > targetFreq) {
+                            freq -= (freq >> 8) * tonePortSpeed;
+                        } else {
+                            freq = targetFreq;
+                        }
+                        printf("%d\n", freq);
+                    } else if (tonePortSource < tonePortTarget) {
+                        printf("TONEPORT+: SOURCE %d - %d = ", sourceFreq, (freq >> 8) * tonePortSpeed);
+                        if (freq < targetFreq) {
+                            freq += (freq >> 8) * tonePortSpeed;
+                        } else {
+                            freq = targetFreq;
+                        }
+                        printf("%d\n", freq);
+                    }*/
+                    chl_stat.back().note_freq = freq;
+                }
+            }
+
+            if (toneUpSild) {
+                if (!chl_stat.empty())
+                    chl_stat.back().note_freq = portToneG(chl_stat.back().note_freq, toneUpSildVar, 0);
+            }
         }
     }
 };

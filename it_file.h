@@ -194,7 +194,7 @@ typedef struct __attribute__((packed)) {
     uint8_t ViD; // Vibrato Depth, ranges from 0->64
     vibrato_waveform_t ViR; // Vibrato waveform type.
     uint8_t ViT; // Vibrato Rate, rate at which vibrato is applied (0->64)
-    float speedTable[128];
+    uint32_t speedTable[128];
     void *sample_data;
 } it_sample_t;
 
