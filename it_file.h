@@ -111,22 +111,6 @@ typedef struct __attribute__((packed)) {
     uint16_t tick;
 } it_inst_env_point_t;
 
-// uint8_t y point
-typedef struct __attribute__((packed)) {
-    uint8_t y;
-    uint16_t tick;
-} it_inst_env_upoint_t;
-
-typedef struct __attribute__((packed)) {
-    it_inst_env_flags_t Flg; // it_inst_env_flags_t
-    uint8_t Num; // Number of node points
-    uint8_t LpB; // Loop beginning
-    uint8_t LpE; // Loop end
-    uint8_t SLB; // Sustain loop beginning
-    uint8_t SLE; // Sustain loop end
-    it_inst_env_upoint_t envelope[25];
-} it_inst_uenvelope_t;
-
 typedef struct __attribute__((packed)) {
     it_inst_env_flags_t Flg; // it_inst_env_flags_t
     uint8_t Num; // Number of node points
@@ -136,6 +120,16 @@ typedef struct __attribute__((packed)) {
     uint8_t SLE; // Sustain loop end
     it_inst_env_point_t envelope[25];
 } it_inst_envelope_t;
+
+typedef struct __attribute__((packed)) {
+    it_inst_env_flags_t Flg; // it_inst_env_flags_t
+    uint16_t Num; // Number of node points
+    uint16_t LpB; // Loop beginning
+    uint16_t LpE; // Loop end
+    uint16_t SLB; // Sustain loop beginning
+    uint16_t SLE; // Sustain loop end
+    int8_t *envelope;
+} it_unpack_envelope_t;
 
 typedef struct __attribute__((packed)) {
     uint8_t note;
@@ -444,6 +438,36 @@ void read_it_inst(FILE *file, uint32_t offset, it_instrument_t *inst) {
         printf("%4d -> %2d\n", inst->pitEnv.envelope[i].tick, inst->pitEnv.envelope[i].y);
     }
     */
+}
+
+void unpack_inst_env(it_inst_envelope_t *pack_env, it_unpack_envelope_t *unpack_env) {
+    unpack_env->Flg = pack_env->Flg;
+    if (pack_env->Num) {
+        uint8_t node = 0;
+        uint16_t nowTick = 0;
+        uint16_t maxTick = pack_env->envelope[pack_env->Num-1].tick + 1;
+        unpack_env->Num = maxTick;
+        unpack_env->LpB = pack_env->envelope[pack_env->LpB].tick;
+        unpack_env->LpE = pack_env->envelope[pack_env->LpE].tick;
+        unpack_env->SLB = pack_env->envelope[pack_env->SLB].tick;
+        unpack_env->SLE = pack_env->envelope[pack_env->SLE].tick;
+        unpack_env->envelope = (int8_t*)malloc(maxTick);
+        for (uint16_t i = 0; i < maxTick; i++) {
+            unpack_env->envelope[i] = LINEAR_INTERP(pack_env->envelope[node].tick,
+                                                    pack_env->envelope[node+1].tick,
+                                                    pack_env->envelope[node].y,
+                                                    pack_env->envelope[node+1].y,
+                                                    nowTick);
+            nowTick++;
+            if (nowTick > pack_env->envelope[node+1].tick) {
+                nowTick = 0;
+                node++;
+            }
+        }
+    } else {
+        unpack_env->envelope = NULL;
+        printf("NULL ENV\n");
+    }
 }
 
 void read_it_sample(FILE *file, uint32_t offset, it_sample_t *sample) {

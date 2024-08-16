@@ -41,6 +41,8 @@ pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
 
+it_unpack_envelope_t *inst_envelope;
+
 uint8_t TicksRow;
 uint16_t TempoTickMax;
 
@@ -525,7 +527,7 @@ void mainTask(void *arg) {
     // Open File
     // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
     // FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
-    FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
+    FILE *file = fopen("/spiffs/atlantishighway.it", "rb");
 
     // Read Header
     display.clearDisplay();
@@ -538,6 +540,7 @@ void mainTask(void *arg) {
     pause_serial();
     // Read Instrument
     it_instrument = (it_instrument_t*)malloc((it_header.InsNum + 1) * sizeof(it_instrument_t));
+    inst_envelope = (it_unpack_envelope_t*)malloc((it_header.InsNum + 1) * sizeof(it_unpack_envelope_t));
     for (uint16_t inst = 0; inst < it_header.InsNum; inst++) {
         display.clearDisplay();
         display.setCursor(0, 0);
@@ -545,6 +548,21 @@ void mainTask(void *arg) {
         display.display();
         printf("Reading Instrument #%d...\n", inst+1);
         read_it_inst(file, it_header.InstOfst[inst], &it_instrument[inst+1]);
+        printf("Unpack Envelope...\n");
+        unpack_inst_env(&it_instrument[inst+1].volEnv, &inst_envelope[inst+1]);
+        if (inst_envelope[inst+1].envelope == NULL) {
+            printf("NULL ENV, SKIP!\n");
+        } else {
+            if (inst_envelope[inst+1].Num == 0) {
+                printf("DISABLE ENV!\n");
+            }
+            printf("Envelope Data:\n");
+            for (uint16_t p = 0; p < inst_envelope[inst+1].Num; p++) {
+                printf("%d ", inst_envelope[inst+1].envelope[p]);
+            }
+            printf("\n");
+        }
+        pause_serial();
     }
 
     // Read Samples
