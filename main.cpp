@@ -369,8 +369,10 @@ void playTask(void *arg) {
                             if (hexToDecimalTens(cmdVal) == 7) {
                                 channels[chl].chl_stat.clear();
                             }
+                        } else if (cmd == 'G') {
+                            // 我喜欢你！！！
                         } else {
-                            // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
                     }
                 }
@@ -531,7 +533,7 @@ void mainTask(void *arg) {
     // Open File
     // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
     // FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
-    FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
+    FILE *file = fopen("/spiffs/atlantishighway.it", "rb");
 
     // Read Header
     display.clearDisplay();
@@ -636,7 +638,7 @@ void setup() {
     printf("I2S NEW CHAN %d\n", i2s_new_channel(&i2s_chan_cfg, &i2s_tx_handle, NULL));
     printf("I2S INIT CHAN %d\n", i2s_channel_init_std_mode(i2s_tx_handle, &i2s_std_cfg));
     printf("I2S ENABLE %d\n", i2s_channel_enable(i2s_tx_handle));
-    xTaskCreate(mainTask, "MAINTASK", 40960, NULL, 4, NULL);
+    xTaskCreate(mainTask, "MAINTASK", 20480, NULL, 4, NULL);
 }
 
 void loop() {

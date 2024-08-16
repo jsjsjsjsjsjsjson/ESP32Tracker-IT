@@ -59,9 +59,13 @@ public:
     uint8_t chl_inst;
     uint8_t chl_note;
 
-    bool enbVolSild;
-    uint8_t volSildUpVar;
-    uint8_t volSildDownVar;
+    bool enbVolSild = false;
+    uint8_t volSildUpVar = 0;
+    uint8_t volSildDownVar = 0;
+
+    bool tonePort = false;
+    uint8_t tonePortSource = 0;
+    uint8_t tonePortTarget = 0;
     // chl_stat.pop_back();
 
     audio_stereo_32_t make_sound() {
@@ -77,7 +81,7 @@ public:
                 || (it_samples[chl_stat[i].note_samp].sample_data == NULL)) {
                 FV_SHOW = 0;
                 // printf("CHL%02d: GlobalVol %d, note_stat %d, ChannelVol %d, vol %d, instVol %d, noteFadeComp %d, sampleVol %d\n", chl, GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl);
-                return result;
+                continue;
             }
             it_sample_t *sample = &it_samples[chl_stat[i].note_samp];
             /*
@@ -143,7 +147,6 @@ public:
 
     void startNote(uint8_t note_in, uint8_t instNum, bool reset) {
         if (!instNum) return;
-        chl_stat_t tmp;
         new_note_activ_t last_nna;
         if (!chl_stat.empty()) {
             if (chl_stat.back().note_inst) {
@@ -154,45 +157,62 @@ public:
         } else {
             last_nna = NNA_CUT;
         }
-        tmp.note_stat = NOTE_ON;
-        tmp.note = note_in;
-        tmp.note_fade_comp = 1024;
-        tmp.note_inst = instNum;
-        tmp.note_samp = it_instrument[instNum].noteToSampTable[tmp.note].sample;
-        tmp.note_freq = it_samples[tmp.note_samp].speedTable[tmp.note];
-        tmp.note_vol = it_samples[tmp.note_samp].Vol;
-        tmp.inst_vol = it_instrument[instNum].GbV;
-        tmp.note_pan = 32;
-        if (it_samples[tmp.note_samp].DfP & 128)
-            tmp.note_pan = it_samples[tmp.note_samp].DfP - 128;
-        if (!it_instrument[instNum].DfP & 128)
-            tmp.note_pan = it_instrument[instNum].DfP - 128;
+        if (reset) {
+            chl_stat_t tmp;
+            tmp.note_stat = NOTE_ON;
+            tmp.note = note_in;
+            tmp.note_fade_comp = 1024;
+            tmp.note_inst = instNum;
+            tmp.note_samp = it_instrument[instNum].noteToSampTable[tmp.note].sample;
+            tmp.note_freq = it_samples[tmp.note_samp].speedTable[tmp.note];
+            tmp.note_vol = it_samples[tmp.note_samp].Vol;
+            tmp.inst_vol = it_instrument[instNum].GbV;
+            tmp.note_pan = 32;
+            if (it_samples[tmp.note_samp].DfP & 128)
+                tmp.note_pan = it_samples[tmp.note_samp].DfP - 128;
+            if (!it_instrument[instNum].DfP & 128)
+                tmp.note_pan = it_instrument[instNum].DfP - 128;
 
-        tmp.frac_index = 0, tmp.int_index = 0;
-        tmp.volNode = 0, tmp.vol_env_tick = 0;
-        if (chl_stat.empty()) {
-            chl_stat.push_back(tmp);
-        } else {
-            if (last_nna == NNA_CUT) {
-                chl_stat.back() = tmp;
+            tmp.frac_index = 0, tmp.int_index = 0;
+            tmp.volNode = 0, tmp.vol_env_tick = 0;
+            if (chl_stat.empty()) {
+                chl_stat.push_back(tmp);
             } else {
-                if (last_nna == NNA_CONTINUE) {
-                    chl_stat.push_back(tmp);
-                } else if (last_nna == NNA_NOTEFADE) {
-                    chl_stat.back().note_stat = NOTE_FADE;
-                    chl_stat.push_back(tmp);
-                } else if (last_nna == NNA_NOTEOFF) {
-                    chl_stat.back().note_stat = NOTE_OFF;
-                    chl_stat.push_back(tmp);
+                if (last_nna == NNA_CUT) {
+                    chl_stat.back() = tmp;
+                } else {
+                    if (last_nna == NNA_CONTINUE) {
+                        chl_stat.push_back(tmp);
+                    } else if (last_nna == NNA_NOTEFADE) {
+                        chl_stat.back().note_stat = NOTE_FADE;
+                        chl_stat.push_back(tmp);
+                    } else if (last_nna == NNA_NOTEOFF) {
+                        chl_stat.back().note_stat = NOTE_OFF;
+                        chl_stat.push_back(tmp);
+                    }
                 }
             }
+        } else {
+            chl_stat_t* tmp = &chl_stat.back();
+            tmp->note_stat = NOTE_ON;
+            tmp->note = note_in;
+            tmp->note_fade_comp = 1024;
+            tmp->note_inst = instNum;
+            tmp->note_samp = it_instrument[instNum].noteToSampTable[tmp->note].sample;
+            tmp->note_vol = it_samples[tmp->note_samp].Vol;
+            tmp->inst_vol = it_instrument[instNum].GbV;
+            tmp->note_pan = 32;
+            if (it_samples[tmp->note_samp].DfP & 128)
+                tmp->note_pan = it_samples[tmp->note_samp].DfP - 128;
+            if (!it_instrument[instNum].DfP & 128)
+                tmp->note_pan = it_instrument[instNum].DfP - 128;
         }
         chl_note = note_in;
     }
 
     void setInst(uint8_t instNum, bool reset) {
         if (!instNum) return;
-        startNote(chl_note, instNum, 1);
+        startNote(chl_note, instNum, reset);
     }
 
     void offNote() {
