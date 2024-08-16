@@ -1,2 +1,2 @@
 #define SMP_RATE 11025
-#define BUFF_SIZE 2048
+#define BUFF_SIZE 1024

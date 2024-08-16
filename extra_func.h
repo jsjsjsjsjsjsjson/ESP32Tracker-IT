@@ -22,11 +22,23 @@
 #define hexToDecimalOnes(num) ((num) & 0x0F)
 #define hexToRow(num) (hexToDecimalTens(num) * 10 + hexToDecimalOnes(num))
 
-#define LINEAR_INTERP(x1, x2, y1, y2, x) \
-    (((x2) - (x1)) != 0 ? \
-    ((y1) + ((y2) - (y1)) * ((x) - (x1)) / ((x2) - (x1))) : 0)  // 或者其他你认为合适的值或处理
+uint8_t COSINE_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t x) {
+    if (x < x1) x = x1;
+    if (x > x2) x = x2;
+    float mu = (float)(x - x1) / (x2 - x1);
+    float mu2 = (1 - cosf(mu * M_PI)) / 2;
+    return (uint8_t)(y1 * (1 - mu2) + y2 * mu2);
+}
 
-
+uint8_t LINEAR_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t x) {
+    if (x1 == x2) return y1;
+    int16_t dx = x2 - x1;
+    int16_t dy = y2 - y1;
+    int16_t y = y1 + (dy * (x - x1)) / dx;
+    if (y < 0) return 0;
+    if (y > 255) return 255;
+    return static_cast<uint8_t>(y);
+}
 
 uint16_t findMax(uint16_t arr[], uint16_t size) {
     if (size == 0) return INT16_MIN;

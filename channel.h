@@ -6,6 +6,7 @@
 extern it_sample_t *it_samples;
 extern it_instrument_t *it_instrument;
 extern uint8_t GlobalVol;
+extern it_unpack_envelope_t *inst_envelope;
 
 typedef enum __attribute__((packed)) {
     NOTE_NOACTV, // 通道没有任何活动（FV == 0）
@@ -65,14 +66,16 @@ public:
 
     audio_stereo_32_t make_sound() {
         audio_stereo_32_t result_sum = {0, 0};
+        if (ChannelVol == 0 || GlobalVol == 0) return result_sum;
         for (uint8_t i = 0; i < chl_stat.size(); i++) {
             audio_stereo_32_t result = {0, 0};
-            if (/*(chl_stat[i].note_stat == NOTE_NOACTV
+            if ((chl_stat[i].note_stat == NOTE_NOACTV
                 || chl_stat[i].note_vol == 0
                 || chl_stat[i].inst_vol == 0
                 || chl_stat[i].volEnvVal == 0
                 || chl_stat[i].note_fade_comp == 0)
-                || */(it_samples[chl_stat[i].note_samp].sample_data == NULL)) {
+                || (it_samples[chl_stat[i].note_samp].sample_data == NULL)) {
+                FV_SHOW = 0;
                 // printf("CHL%02d: GlobalVol %d, note_stat %d, ChannelVol %d, vol %d, instVol %d, noteFadeComp %d, sampleVol %d\n", chl, GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl);
                 return result;
             }
@@ -280,67 +283,29 @@ public:
             chl_stat_t *tmp = &chl_stat[i];
             it_inst_envelope_t vol_env = it_instrument[tmp->note_inst].volEnv;
             if (vol_env.Flg.EnvOn) {
+                tmp->volEnvVal = inst_envelope[tmp->note_inst].envelope[tmp->vol_env_tick];
+                tmp->vol_env_tick++;
                 if (vol_env.Flg.LoopOn) {
-                    tmp->vol_env_tick++;
-                    if (vol_env.Flg.SusLoopOn && tmp->note_stat == NOTE_ON) {
-                        if (vol_env.SLB == vol_env.SLE) {
-                            tmp->volNode = vol_env.SLB;
-                            tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
-                        }
-                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
-                            tmp->vol_env_tick = 0;
-                            tmp->volNode++;
-                            if (tmp->volNode >= vol_env.SLE) {
-                                tmp->volNode = vol_env.SLB;
-                                tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
-                            }
+                    if (tmp->note_stat == NOTE_ON && vol_env.Flg.SusLoopOn) {
+                        if (tmp->vol_env_tick >= inst_envelope[tmp->note_inst].SLE) {
+                            tmp->vol_env_tick = inst_envelope[tmp->note_inst].SLB;
                         }
                     } else {
-                        if (vol_env.LpB == vol_env.LpE) {
-                            tmp->volNode = vol_env.LpB;
-                            tmp->vol_env_tick = vol_env.envelope[vol_env.LpB].tick;
-                        }
-                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
-                            // tmp->vol_env_tick = 0;
-                            tmp->volNode++;
-                            if (tmp->volNode >= vol_env.LpE) {
-                                tmp->volNode = vol_env.LpB;
-                                tmp->vol_env_tick = vol_env.envelope[vol_env.LpB].tick;
-                            }
+                        if (tmp->vol_env_tick >= inst_envelope[tmp->note_inst].LpE) {
+                            tmp->vol_env_tick = inst_envelope[tmp->note_inst].LpB;
                         }
                     }
-                    // tmp->volEnvVal = 64;
-                    tmp->volEnvVal = abs(LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
-                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick));
                 } else {
-                    tmp->vol_env_tick++;
-                    if (vol_env.Flg.SusLoopOn && tmp->note_stat == NOTE_ON) {
-                        if (vol_env.SLB == vol_env.SLE) {
-                            tmp->volNode = vol_env.SLB;
-                            tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
-                        }
-                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
-                            tmp->vol_env_tick = 0;
-                            tmp->volNode++;
-                            if (tmp->volNode >= vol_env.SLE) {
-                                tmp->volNode = vol_env.SLB;
-                                tmp->vol_env_tick = vol_env.envelope[vol_env.SLB].tick;
-                            }
+                    if (tmp->note_stat == NOTE_ON && vol_env.Flg.SusLoopOn) {
+                        if (tmp->vol_env_tick >= inst_envelope[tmp->note_inst].SLE) {
+                            tmp->vol_env_tick = inst_envelope[tmp->note_inst].SLB;
                         }
                     } else {
-                        if (tmp->vol_env_tick >= vol_env.envelope[tmp->volNode+1].tick) {
-                            tmp->volNode++;
-                            if (tmp->volNode >= vol_env.Num - 2) {
-                                tmp->volNode--;
-                                tmp->vol_env_tick--;
-                                tmp->note_stat = NOTE_OFF;
-                            } else {
-                                tmp->vol_env_tick = 0;
-                            }
+                        if (tmp->vol_env_tick >= inst_envelope[tmp->note_inst].Num) {
+                            tmp->vol_env_tick--;
+                            tmp->note_stat = NOTE_OFF;
                         }
                     }
-                    tmp->volEnvVal = abs(LINEAR_INTERP(vol_env.envelope[tmp->volNode].tick, vol_env.envelope[tmp->volNode+1].tick, 
-                                                vol_env.envelope[tmp->volNode].y, vol_env.envelope[tmp->volNode+1].y, tmp->vol_env_tick));
                 }
             } else {
                 tmp->volEnvVal = 64;
@@ -356,11 +321,11 @@ public:
                         clearBeginNote(i);
                         // printf("CHL CLEAR NOTE %d\n", i);
                     }
-                } else {
+                }/* else {
                     tmp->note_fade_comp = 0;
                     tmp->note_stat = NOTE_NOACTV;
                     clearBeginNote(i);
-                }
+                }*/
             }
         }
 

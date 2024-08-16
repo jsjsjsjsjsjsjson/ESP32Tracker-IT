@@ -177,10 +177,12 @@ void play_chl_cmd(int argc, const char* argv[]) {
                         // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, testChl.chl_note, testChl.chl_inst);
                     } else if (noteTmp == 255) {
                         // printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
-                        testChl.fadeNote();
+                        testChl.offNote();
                         
                     } else if (noteTmp == 254) {
                         testChl.cutNote();
+                    } else {
+                        testChl.fadeNote();
                     }
                 }
                 if (GET_INSTRUMENT(mask)) {
@@ -335,10 +337,12 @@ void playTask(void *arg) {
                             // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, channels[chl].chl_note, channels[chl].chl_inst);
                         } else if (noteTmp == 255) {
                             // printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
-                            channels[chl].fadeNote();
+                            channels[chl].offNote();
                             
                         } else if (noteTmp == 254) {
                             channels[chl].cutNote();
+                        } else {
+                            channels[chl].fadeNote();
                         }
                     }
                     if (GET_INSTRUMENT(mask)) {
@@ -527,7 +531,7 @@ void mainTask(void *arg) {
     // Open File
     // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
     // FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
-    FILE *file = fopen("/spiffs/atlantishighway.it", "rb");
+    FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
 
     // Read Header
     display.clearDisplay();

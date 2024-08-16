@@ -422,12 +422,12 @@ void read_it_inst(FILE *file, uint32_t offset, it_instrument_t *inst) {
     }
     printf("\n\n");
 
-    /*
     printf("Vol Env:\n");
     for (uint8_t i = 0; i < 25; i++) {
         printf("%4d -> %2d\n", inst->volEnv.envelope[i].tick, inst->volEnv.envelope[i].y);
     }
 
+    /*
     printf("Pan Env:\n");
     for (uint8_t i = 0; i < 25; i++) {
         printf("%4d -> %2d\n", inst->panEnv.envelope[i].tick, inst->panEnv.envelope[i].y);
@@ -453,14 +453,15 @@ void unpack_inst_env(it_inst_envelope_t *pack_env, it_unpack_envelope_t *unpack_
         unpack_env->SLE = pack_env->envelope[pack_env->SLE].tick;
         unpack_env->envelope = (int8_t*)malloc(maxTick);
         for (uint16_t i = 0; i < maxTick; i++) {
+            // printf("TICK=%d X1=%d X2=%d Y1=%d Y2=%d R=", nowTick, pack_env->envelope[node].tick, pack_env->envelope[node+1].tick, pack_env->envelope[node].y, pack_env->envelope[node+1].y);
             unpack_env->envelope[i] = LINEAR_INTERP(pack_env->envelope[node].tick,
                                                     pack_env->envelope[node+1].tick,
                                                     pack_env->envelope[node].y,
                                                     pack_env->envelope[node+1].y,
                                                     nowTick);
+            // printf("%d\n", unpack_env->envelope[i]);
             nowTick++;
-            if (nowTick > pack_env->envelope[node+1].tick) {
-                nowTick = 0;
+            if (nowTick >= pack_env->envelope[node+1].tick) {
                 node++;
             }
         }
