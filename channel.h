@@ -376,7 +376,7 @@ public:
         }
 
         // refrush Effect
-        if (!Gtick) {
+        if (Gtick) {
             if (volSildDownVar) {
                 volSildDown(volSildDownVar);
             } else if (volSildUpVar) {
@@ -388,31 +388,30 @@ public:
                     uint32_t freq = chl_stat.back().note_freq;
                     uint32_t sourceFreq = it_samples[chl_stat.back().note_samp].speedTable[tonePortSource];
                     uint32_t targetFreq = it_samples[chl_stat.back().note_samp].speedTable[tonePortTarget];
-                    /*
                     if (tonePortSource > tonePortTarget) {
-                        printf("TONEPORT-: SOURCE %d - %d = ", sourceFreq, (freq >> 8) * tonePortSpeed);
+                        // printf("TONEPORT-: SOURCE %d - %d = ", sourceFreq, powf(2, tonePortSpeed / 192.0f));
                         if (freq > targetFreq) {
-                            freq -= (freq >> 8) * tonePortSpeed;
+                            freq *= powf(2, -tonePortSpeed / 192.0f);
                         } else {
                             freq = targetFreq;
                         }
-                        printf("%d\n", freq);
+                        // printf("%d\n", freq);
                     } else if (tonePortSource < tonePortTarget) {
-                        printf("TONEPORT+: SOURCE %d - %d = ", sourceFreq, (freq >> 8) * tonePortSpeed);
+                        // printf("TONEPORT+: SOURCE %d - %d = ", sourceFreq, powf(2, tonePortSpeed / 192.0f));
                         if (freq < targetFreq) {
-                            freq += (freq >> 8) * tonePortSpeed;
+                            freq *= powf(2, tonePortSpeed / 192.0f);
                         } else {
                             freq = targetFreq;
                         }
-                        printf("%d\n", freq);
-                    }*/
+                        // printf("%d\n", freq);
+                    }
                     chl_stat.back().note_freq = freq;
                 }
             }
 
             if (toneUpSild) {
                 if (!chl_stat.empty())
-                    chl_stat.back().note_freq = portToneG(chl_stat.back().note_freq, toneUpSildVar, 0);
+                    chl_stat.back().note_freq *= powf(2, toneUpSildVar / 192.0f);
             }
         }
     }

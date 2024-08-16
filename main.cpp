@@ -239,13 +239,13 @@ void playTask(void *arg) {
                 // printf("ROW %03d\n", tracker_rows);
                 for (uint16_t chl = 0; chl < maxChannel; chl++) {
                     uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
+                    reset = true;
+                    channels[chl].setVolSild(false, 0);
+                    channels[chl].setPortTone(false, 0);
+                    channels[chl].setToneUpSild(false, 0);
                     if (GET_COMMAND(mask)) {
                         char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                         uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
-                        reset = true;
-                        channels[chl].setVolSild(false, 0);
-                        channels[chl].setPortTone(false, 0);
-                        channels[chl].setToneUpSild(false, 0);
                         if (cmd == 'A') {
                             // 设定Ticks/Row
                             TicksRow = cmdVal;
@@ -265,11 +265,11 @@ void playTask(void *arg) {
                             }
                         } else if (cmd == 'G') {
                             reset = false;
-                            // channels[chl].setPortTone(true, cmdVal);
+                            channels[chl].setPortTone(true, cmdVal);
                         } else if (cmd == 'F') {
                             reset = false;
                             channels[chl].setToneUpSild(true, cmdVal);
-                            printf("TONEUP: %d\n", channels[chl].toneUpSildVar);
+                            printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
                         } else {
                             // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
@@ -432,6 +432,33 @@ void debug_actv_cmd(int argc, const char* argv[]) {
     }
 }
 
+void debug_pitsild_cmd(int argc, const char* argv[]) {
+    if (argc < 2) {printf("%s <ChannelNum>\n", argv[0]);return;}
+    uint8_t chl = strtol(argv[1], NULL, 0);
+    if (chl == 255) {
+        for (;;) {
+            for (uint8_t i = 0; i < maxChannel; i++) {
+                printf("%d", channels[i].toneUpSild);
+            }
+            printf("\n");
+            if (Serial.available()) {
+                Serial.read();
+                break;
+            }
+            vTaskDelay(2);
+        }
+    } else {
+        for (;;) {
+            printf("%d\n", channels[chl].toneUpSild);
+            if (Serial.available()) {
+                Serial.read();
+                break;
+            }
+            vTaskDelay(2);
+        }
+    }
+}
+
 void mainTask(void *arg) {
     SerialTerminal terminal;
     SPI.begin(17, -1, 16);
@@ -455,6 +482,7 @@ void mainTask(void *arg) {
     terminal.addCommand("debug_note_stat", debug_note_stat_cmd);
     terminal.addCommand("debug_note_map", debug_note_map_cmd);
     terminal.addCommand("debug_actv", debug_actv_cmd);
+    terminal.addCommand("debug_pitsild", debug_pitsild_cmd);
     // terminal.addCommand("play_chl", play_chl_cmd);
     // terminal.addCommand("get_heap_stat", get_heap_stat);
     // Open File
