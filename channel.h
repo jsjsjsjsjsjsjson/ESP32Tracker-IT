@@ -64,12 +64,19 @@ public:
     uint8_t volSildDownVar = 0;
 
     bool tonePort = false;
+    uint32_t tonePortSetStat = 0;
+    uint32_t sourceFreq = 0;
     uint8_t tonePortSource = 0;
     uint8_t tonePortTarget = 0;
     uint8_t tonePortSpeed = 0;
 
+    uint32_t toneSildFreq = 0;
+
     bool toneUpSild = false;
     uint8_t toneUpSildVar = 0;
+
+    bool toneDownSild = false;
+    uint8_t toneDownSildVar = 0;
     // chl_stat.pop_back();
 
     audio_stereo_32_t make_sound() {
@@ -149,19 +156,19 @@ public:
         return result_sum;
     }
 
-    void startNote(uint8_t note_in, uint8_t instNum, bool reset) {
+    void startNote(uint8_t note_in, uint8_t instNum, bool reset, uint16_t sampOfst) {
         if (!instNum) return;
-        new_note_activ_t last_nna;
-        if (!chl_stat.empty()) {
-            if (chl_stat.back().note_inst) {
-                last_nna = it_instrument[chl_stat.back().note_inst].NNA;
+        if (reset || chl_stat.empty()) {
+            new_note_activ_t last_nna;
+            if (!chl_stat.empty()) {
+                if (chl_stat.back().note_inst) {
+                    last_nna = it_instrument[chl_stat.back().note_inst].NNA;
+                } else {
+                    last_nna = NNA_CUT;
+                }
             } else {
                 last_nna = NNA_CUT;
             }
-        } else {
-            last_nna = NNA_CUT;
-        }
-        if (reset) {
             chl_stat_t tmp;
             tmp.note_stat = NOTE_ON;
             tmp.note = note_in;
@@ -177,7 +184,7 @@ public:
             if (!it_instrument[instNum].DfP & 128)
                 tmp.note_pan = it_instrument[instNum].DfP - 128;
 
-            tmp.frac_index = 0, tmp.int_index = 0;
+            tmp.frac_index = 0, tmp.int_index = sampOfst;
             tmp.volNode = 0, tmp.vol_env_tick = 0;
             if (chl_stat.empty()) {
                 chl_stat.push_back(tmp);
@@ -197,11 +204,13 @@ public:
                 }
             }
         } else {
+            chl_stat_t tmp;
             if (!chl_stat.empty()) {
                 chl_stat_t* tmp = &chl_stat.back();
-                // tmp->note_stat = NOTE_ON;
+                tmp->note_stat = NOTE_ON;
                 tmp->note = note_in;
-                // tmp->note_fade_comp = 1024;
+                tmp->note_freq = it_samples[tmp->note_samp].speedTable[tmp->note];
+                tmp->note_fade_comp = 1024;
                 tmp->note_inst = instNum;
                 tmp->note_samp = it_instrument[instNum].noteToSampTable[tmp->note].sample;
                 tmp->note_vol = it_samples[tmp->note_samp].Vol;
@@ -216,10 +225,12 @@ public:
         chl_note = note_in;
     }
 
+    /*
     void setInst(uint8_t instNum, bool reset) {
         if (!instNum) return;
         startNote(chl_note, instNum, reset);
     }
+    */
 
     void offNote() {
         if (it_instrument[chl_inst].NNA == NNA_CUT) {
@@ -290,6 +301,12 @@ public:
                 chl_stat.back().note_vol = val;
             } else if (flg == 'p') {
                 chl_stat.back().note_pan = val;
+            } else if (flg == 'c') {
+                enbVolSild = true;
+                volSildUpVar = val;
+            } else if (flg == 'd') {
+                enbVolSild = true;
+                volSildDownVar = val;
             }
         }
     }
@@ -300,12 +317,13 @@ public:
 
     void setPortTone(bool stat, uint8_t speed) {
         tonePort = stat;
-        if (tonePortSpeed)
+        if (speed)
             tonePortSpeed = speed;
     }
 
     void setPortSource(uint8_t note) {
         tonePortSource = note;
+        tonePortSetStat = chl_stat.back().note_freq;
     }
 
     void setToneUpSild(bool stat, uint8_t var) {
@@ -314,8 +332,19 @@ public:
             toneUpSildVar = var;
     }
 
+    void setToneDownSild(bool stat, uint8_t var) {
+        toneDownSild = stat;
+        if (var)
+            toneDownSildVar = var;
+    }
+
     void setPortTarget(uint8_t note) {
         tonePortTarget = note;
+        if (tonePortTarget == tonePortSource && tonePortSetStat) {
+            printf("SET TARGET = SOURCE\n");
+            sourceFreq = tonePortSetStat;
+        }
+        tonePortSetStat = 0;
     }
 
     void refrush_note(uint32_t Gtick) {
@@ -377,19 +406,22 @@ public:
 
         // refrush Effect
         if (Gtick) {
-            if (volSildDownVar) {
-                volSildDown(volSildDownVar);
-            } else if (volSildUpVar) {
-                volSildUp(volSildUpVar);
+            if (enbVolSild) {
+                if (volSildDownVar) {
+                    volSildDown(volSildDownVar);
+                } else if (volSildUpVar) {
+                    volSildUp(volSildUpVar);
+                }
             }
 
             if (tonePort) {
                 if (!chl_stat.empty()) {
                     uint32_t freq = chl_stat.back().note_freq;
-                    uint32_t sourceFreq = it_samples[chl_stat.back().note_samp].speedTable[tonePortSource];
+                    if (tonePortSource != tonePortTarget)
+                        sourceFreq = it_samples[chl_stat.back().note_samp].speedTable[tonePortSource];
                     uint32_t targetFreq = it_samples[chl_stat.back().note_samp].speedTable[tonePortTarget];
                     if (tonePortSource > tonePortTarget) {
-                        // printf("TONEPORT-: SOURCE %d - %d = ", sourceFreq, powf(2, tonePortSpeed / 192.0f));
+                        // printf("TONEPORT-: SOURCE %d * %f = ", freq, powf(2, -tonePortSpeed / 192.0f));
                         if (freq > targetFreq) {
                             freq *= powf(2, -tonePortSpeed / 192.0f);
                         } else {
@@ -397,13 +429,32 @@ public:
                         }
                         // printf("%d\n", freq);
                     } else if (tonePortSource < tonePortTarget) {
-                        // printf("TONEPORT+: SOURCE %d - %d = ", sourceFreq, powf(2, tonePortSpeed / 192.0f));
+                        // printf("TONEPORT+: SOURCE %d * %f = ", freq, powf(2, tonePortSpeed / 192.0f));
                         if (freq < targetFreq) {
                             freq *= powf(2, tonePortSpeed / 192.0f);
                         } else {
                             freq = targetFreq;
                         }
                         // printf("%d\n", freq);
+                    } else {
+                        // printf("TONEPORT: TARGET = SOURCE!\n");
+                        if (sourceFreq > targetFreq) {
+                            // printf("TONEPORT-: SOURCE %d * %f = ", freq, powf(2, -tonePortSpeed / 192.0f));
+                            if (freq > targetFreq) {
+                                freq *= powf(2, -tonePortSpeed / 192.0f);
+                            } else {
+                                freq = targetFreq;
+                            }
+                            // printf("%d\n", freq);
+                        } else if (sourceFreq < targetFreq) {
+                            // printf("TONEPORT+: SOURCE %d * %f = ", freq, powf(2, tonePortSpeed / 192.0f));
+                            if (freq < targetFreq) {
+                                freq *= powf(2, tonePortSpeed / 192.0f);
+                            } else {
+                                freq = targetFreq;
+                            }
+                            // printf("%d\n", freq);
+                        }
                     }
                     chl_stat.back().note_freq = freq;
                 }
@@ -412,6 +463,11 @@ public:
             if (toneUpSild) {
                 if (!chl_stat.empty())
                     chl_stat.back().note_freq *= powf(2, toneUpSildVar / 192.0f);
+            }
+
+            if (toneDownSild) {
+                if (!chl_stat.empty())
+                    chl_stat.back().note_freq *= powf(2, -toneDownSildVar / 192.0f);
             }
         }
     }

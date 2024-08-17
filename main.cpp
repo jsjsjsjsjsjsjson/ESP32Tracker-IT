@@ -221,7 +221,8 @@ void playTask(void *arg) {
     uint8_t tracker_pats = it_header.Orders[tracker_ords];
     uint32_t tempo_tick = 0;
     uint32_t tick = 0;
-    bool reset = true;
+    uint16_t sampOfst[MAX_CHANNELS]= {0};
+    bool reset[MAX_CHANNELS] = {true};
     printf("Readly...\n");
     channels = new Channel[maxChannel];
     xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
@@ -238,11 +239,16 @@ void playTask(void *arg) {
                 tick = 0;
                 // printf("ROW %03d\n", tracker_rows);
                 for (uint16_t chl = 0; chl < maxChannel; chl++) {
+                    if (unpack_data[tracker_pats] == NULL) {
+                        continue;
+                    }
                     uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
-                    reset = true;
+                    reset[chl] = true;
+                    sampOfst[chl] = 0;
                     channels[chl].setVolSild(false, 0);
                     channels[chl].setPortTone(false, 0);
                     channels[chl].setToneUpSild(false, 0);
+                    channels[chl].setToneDownSild(false, 0);
                     if (GET_COMMAND(mask)) {
                         char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
                         uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
@@ -264,14 +270,22 @@ void playTask(void *arg) {
                                 channels[chl].chl_stat.clear();
                             }
                         } else if (cmd == 'G') {
-                            reset = false;
+                            reset[chl] = false;
                             channels[chl].setPortTone(true, cmdVal);
+                        } else if (cmd == 'E') {
+                            reset[chl] = false;
+                            channels[chl].setToneDownSild(true, cmdVal);
+                            printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
                         } else if (cmd == 'F') {
-                            reset = false;
+                            reset[chl] = false;
                             channels[chl].setToneUpSild(true, cmdVal);
                             printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
+                        } else if (cmd == 'O') {
+                            sampOfst[chl] = cmdVal;
+                            if (!channels[chl].chl_stat.empty())
+                                channels[chl].chl_stat.back().int_index = cmdVal;
                         } else {
-                            // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
                     }
                     if (GET_NOTE(mask)) {
@@ -279,12 +293,21 @@ void playTask(void *arg) {
                         if (noteTmp < 120) {
                             if (channels[chl].tonePort) {
                                 channels[chl].setPortSource(channels[chl].chl_note);
-                                channels[chl].startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, reset);
+                                channels[chl].startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, reset[chl], 0);
                                 channels[chl].setPortTarget(channels[chl].chl_note);
-                                printf("INFO: G%02X SOURCE=%d TARGET=%d\n", channels[chl].tonePortSpeed, channels[chl].tonePortSource, channels[chl].tonePortTarget);
+                                char st[4];
+                                char tt[4];
+                                midi_note_to_string(channels[chl].tonePortSource, st);
+                                midi_note_to_string(channels[chl].tonePortTarget, tt);
+                                printf("INFO: G%02X SOURCE=%s TARGET=%s\n", channels[chl].tonePortSpeed, st, tt);
                             } else {
-                                channels[chl].startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, reset);
+                                if (GET_INSTRUMENT(mask)) {
+                                    channels[chl].startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, reset[chl], sampOfst[chl]);
+                                } else {
+                                    channels[chl].chl_note = noteTmp;
+                                }
                             }
+                            // printf("NOTE RESET = %d\n", reset);
                             // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, channels[chl].chl_note, channels[chl].chl_inst);
                         } else if (noteTmp == 255) {
                             // printf("CHL%02d ROW%03d: NOTE OFF\n", chl, tracker_rows);
@@ -296,11 +319,8 @@ void playTask(void *arg) {
                             channels[chl].fadeNote();
                         }
                     }
-                    if (GET_INSTRUMENT(mask)) {
-                        channels[chl].setInst(unpack_data[tracker_pats][chl][tracker_rows].instrument, true);
-                    }
                     if (GET_VOLUME(mask)) {
-                        channels[chl].setVolVal(unpack_data[tracker_pats][chl][tracker_rows].volume, false);
+                        channels[chl].setVolVal(unpack_data[tracker_pats][chl][tracker_rows].volume, reset);
                     }
                 }
                 //printf("%02d %03d: ", tracker_pats, tracker_rows);

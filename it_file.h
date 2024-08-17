@@ -380,7 +380,7 @@ void read_and_unpack_pattern(FILE *file, uint32_t offset, pattern_note_t **unpac
     printf("File Jmp To 0x%x\n", ftell(file));
     fread(&pattern_data, 2, 2, file);
     printf("Rows %d, Len %d\n", pattern_data.rows, pattern_data.length);
-    if (pattern_data.rows > 200 || pattern_data.rows < 32 || pattern_data.length > 65527) {
+    if (pattern_data.rows > 200 || pattern_data.rows < 4 || pattern_data.length > 65527) {
         printf("This is not a valid Pattern!\n\n");
         *RowsOut = 0;
         return;

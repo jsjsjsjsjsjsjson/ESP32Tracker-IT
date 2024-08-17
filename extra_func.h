@@ -28,7 +28,7 @@
 #define PORTDOWN16(f, t) (f - ((f * t) >> 8))
 #define PORTDOWN64(f, t) (f - ((f * t) >> 10))
 
-uint32_t portToneG(uint32_t original_frequency, int32_t slide_units, uint8_t extra_fine) {
+inline uint32_t tone_freq_sild(uint32_t original_frequency, int32_t slide_units, uint8_t extra_fine) {
     float freq = (float)original_frequency;
     float semitone_per_unit = extra_fine ? 1.0f / 64.0f : 1.0f / 16.0f;
     float semitone_change = slide_units * semitone_per_unit;
@@ -36,7 +36,7 @@ uint32_t portToneG(uint32_t original_frequency, int32_t slide_units, uint8_t ext
     return (uint32_t)new_freq;
 }
 
-uint8_t COSINE_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t x) {
+inline uint8_t COSINE_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t x) {
     if (x < x1) x = x1;
     if (x > x2) x = x2;
     float mu = (float)(x - x1) / (x2 - x1);
@@ -44,7 +44,7 @@ uint8_t COSINE_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t
     return (uint8_t)(y1 * (1 - mu2) + y2 * mu2);
 }
 
-uint8_t LINEAR_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t x) {
+inline uint8_t LINEAR_INTERP(uint16_t x1, uint16_t x2, uint8_t y1, uint8_t y2, uint16_t x) {
     if (x1 == x2) return y1;
     int16_t dx = x2 - x1;
     int16_t dy = y2 - y1;
