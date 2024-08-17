@@ -156,7 +156,7 @@ public:
         return result_sum;
     }
 
-    void startNote(uint8_t note_in, uint8_t instNum, bool reset, uint16_t sampOfst) {
+    void startNote(uint8_t instNum, bool reset, uint16_t sampOfst) {
         if (!instNum) return;
         if (reset || chl_stat.empty()) {
             new_note_activ_t last_nna;
@@ -171,7 +171,7 @@ public:
             }
             chl_stat_t tmp;
             tmp.note_stat = NOTE_ON;
-            tmp.note = note_in;
+            tmp.note = chl_note;
             tmp.note_fade_comp = 1024;
             tmp.note_inst = instNum;
             tmp.note_samp = it_instrument[instNum].noteToSampTable[tmp.note].sample;
@@ -208,7 +208,7 @@ public:
             if (!chl_stat.empty()) {
                 chl_stat_t* tmp = &chl_stat.back();
                 tmp->note_stat = NOTE_ON;
-                tmp->note = note_in;
+                tmp->note = chl_note;
                 tmp->note_freq = it_samples[tmp->note_samp].speedTable[tmp->note];
                 tmp->note_fade_comp = 1024;
                 tmp->note_inst = instNum;
@@ -222,7 +222,10 @@ public:
                     tmp->note_pan = it_instrument[instNum].DfP - 128;
             }
         }
-        chl_note = note_in;
+    }
+
+    void changeNote(uint8_t note) {
+
     }
 
     /*
@@ -247,8 +250,21 @@ public:
     void setVolSild(bool stat, uint8_t var) {
         enbVolSild = stat;
         if (stat && var) {
-            volSildUpVar = hexToDecimalTens(var);
-            volSildDownVar = hexToDecimalOnes(var);
+            uint8_t x = (var >> 4) & 0xF;
+            uint8_t y = var & 0xF;
+            if (x == 0x0 && y != 0x0) {
+                volSildDownVar = y;
+            } else if (x != 0x0 && y == 0x0) {
+                volSildUpVar = x;
+            } else if (x == 0xF && y != 0xF) {
+                enbVolSild = false;
+                volSildDown(y);
+            } else if (x != 0xF && y == 0xF) {
+                enbVolSild = false;
+                volSildUp(x);
+            } else {
+                enbVolSild = false;
+            }
         }
     }
 
@@ -290,7 +306,7 @@ public:
         }
     }
 
-    void setVolVal(uint8_t volVal, bool reset) {
+    void setVolVal(uint8_t volVal) {
         if (chl_stat.empty()) {
             printf("WARNING: SET A EMPTY CHL\n");
         } else {

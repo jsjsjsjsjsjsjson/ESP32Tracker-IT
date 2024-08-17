@@ -275,17 +275,17 @@ void playTask(void *arg) {
                         } else if (cmd == 'E') {
                             reset[chl] = false;
                             channels[chl].setToneDownSild(true, cmdVal);
-                            printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
+                            // printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
                         } else if (cmd == 'F') {
                             reset[chl] = false;
                             channels[chl].setToneUpSild(true, cmdVal);
-                            printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
+                            // printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
                         } else if (cmd == 'O') {
                             sampOfst[chl] = cmdVal;
                             if (!channels[chl].chl_stat.empty())
                                 channels[chl].chl_stat.back().int_index = cmdVal;
                         } else {
-                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                            // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
                         }
                     }
                     if (GET_NOTE(mask)) {
@@ -293,19 +293,17 @@ void playTask(void *arg) {
                         if (noteTmp < 120) {
                             if (channels[chl].tonePort) {
                                 channels[chl].setPortSource(channels[chl].chl_note);
-                                channels[chl].startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, reset[chl], 0);
+                                channels[chl].chl_note = noteTmp;
                                 channels[chl].setPortTarget(channels[chl].chl_note);
+                                /*
                                 char st[4];
                                 char tt[4];
                                 midi_note_to_string(channels[chl].tonePortSource, st);
                                 midi_note_to_string(channels[chl].tonePortTarget, tt);
                                 printf("INFO: G%02X SOURCE=%s TARGET=%s\n", channels[chl].tonePortSpeed, st, tt);
+                                */
                             } else {
-                                if (GET_INSTRUMENT(mask)) {
-                                    channels[chl].startNote(noteTmp, unpack_data[tracker_pats][chl][tracker_rows].instrument, reset[chl], sampOfst[chl]);
-                                } else {
-                                    channels[chl].chl_note = noteTmp;
-                                }
+                                channels[chl].chl_note = noteTmp;
                             }
                             // printf("NOTE RESET = %d\n", reset);
                             // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, channels[chl].chl_note, channels[chl].chl_inst);
@@ -319,8 +317,11 @@ void playTask(void *arg) {
                             channels[chl].fadeNote();
                         }
                     }
+                    if (GET_INSTRUMENT(mask)) {
+                        channels[chl].startNote(unpack_data[tracker_pats][chl][tracker_rows].instrument, reset[chl], sampOfst[chl]);
+                    }
                     if (GET_VOLUME(mask)) {
-                        channels[chl].setVolVal(unpack_data[tracker_pats][chl][tracker_rows].volume, reset);
+                        channels[chl].setVolVal(unpack_data[tracker_pats][chl][tracker_rows].volume);
                     }
                 }
                 //printf("%02d %03d: ", tracker_pats, tracker_rows);
