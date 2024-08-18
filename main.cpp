@@ -41,6 +41,10 @@ pattern_note_t ***unpack_data; // unpack_data[PatNum][Channel][Rows].note_data
 uint16_t *maxChlTable;
 uint16_t *maxRowTable;
 
+int16_t tracker_rows = 0;
+int16_t tracker_ords = 0;
+uint8_t tracker_pats = 0;
+
 it_unpack_envelope_t *inst_envelope;
 
 uint8_t TicksRow;
@@ -208,6 +212,26 @@ void displayTask(void *arg) {
     }
 }
 
+void skipNextPat(uint8_t row) {
+    tracker_rows = row;
+    tracker_ords++;
+    while (it_header.Orders[tracker_ords] == 254) {
+        tracker_ords++;
+    }
+    if (it_header.Orders[tracker_ords] == 255)
+        tracker_ords = 0;
+
+    tracker_pats = it_header.Orders[tracker_ords];
+    printf("skip to %d -> %d row %d\n", tracker_ords, tracker_pats, tracker_rows);
+}
+
+void jumpToPat(uint8_t ord) {
+    tracker_rows = 0;
+    tracker_ords = ord;
+    tracker_pats = it_header.Orders[tracker_ords];
+    printf("skip to %d -> %d\n", tracker_ords, tracker_pats);
+}
+
 void playTask(void *arg) {
     size_t writed;
     printf("Initialisation....\n");
@@ -216,9 +240,9 @@ void playTask(void *arg) {
     TicksRow = it_header.IS;
     printf("TicksRow: %d\n", TicksRow);
     uint16_t bufferIndex = 0;
-    int16_t tracker_rows = 0;
-    int16_t tracker_ords = 0;
-    uint8_t tracker_pats = it_header.Orders[tracker_ords];
+    tracker_rows = 0;
+    tracker_ords = 0;
+    tracker_pats = it_header.Orders[tracker_ords];
     uint32_t tempo_tick = 0;
     uint32_t tick = 0;
     uint16_t sampOfst[MAX_CHANNELS]= {0};
@@ -227,8 +251,9 @@ void playTask(void *arg) {
     channels = new Channel[maxChannel];
     xTaskCreatePinnedToCore(displayTask, "DISPLAY", 4096, NULL, 4, NULL, 1);
     for (uint8_t c = 0; c < maxChannel; c++) {
-        channels[c].ChannelPan = it_header.ChnlPan[c];
+        channels[c].ChannelPan = (it_header.ChnlPan[c] - 31) * 2;
         channels[c].ChannelVol = it_header.ChnlVol[c];
+        channels[c].num = c;
     }
     // pause_serial();
     for (;;) {
@@ -243,57 +268,38 @@ void playTask(void *arg) {
                         continue;
                     }
                     uint8_t mask = unpack_data[tracker_pats][chl][tracker_rows].mask;
+                    uint8_t noteTmp = unpack_data[tracker_pats][chl][tracker_rows].note;
+                    uint8_t commandTmp = unpack_data[tracker_pats][chl][tracker_rows].command;
+                    char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
+                    uint8_t cmdVar = unpack_data[tracker_pats][chl][tracker_rows].command_value;
+                    uint8_t instTmp = unpack_data[tracker_pats][chl][tracker_rows].instrument;
+                    char volFlg;
+                    uint8_t volVar;
+                    volCmdToRel(unpack_data[tracker_pats][chl][tracker_rows].volume, &volFlg, &volVar);
+
                     reset[chl] = true;
                     sampOfst[chl] = 0;
                     channels[chl].setVolSild(false, 0);
                     channels[chl].setPortTone(false, 0);
                     channels[chl].setToneUpSild(false, 0);
                     channels[chl].setToneDownSild(false, 0);
+                    if (GET_VOLUME(mask)) {
+                        if (volFlg == 'g') {
+                            reset[chl] = false;
+                            channels[chl].setVolSild(true, volCmdPortToneToRelPortToneLUT[volVar]);
+                        }
+                    }
                     if (GET_COMMAND(mask)) {
-                        char cmd = 64 + unpack_data[tracker_pats][chl][tracker_rows].command;
-                        uint8_t cmdVal = unpack_data[tracker_pats][chl][tracker_rows].command_value;
-                        if (cmd == 'A') {
-                            // 设定Ticks/Row
-                            TicksRow = cmdVal;
-                            // tick = cmdVal;
-                        } else if (cmd == 'M') {
-                            // 设定通道音量
-                            channels[chl].setChanVol(cmdVal);
-                        } else if (cmd == 'V') {
-                            // 设定全局音量
-                            GlobalVol = cmdVal;
-                        } else if (cmd == 'D') {
-                            // 音量滑动
-                            channels[chl].setVolSild(true, cmdVal);
-                        } else if (cmd == 'S') {
-                            if (hexToDecimalTens(cmdVal) == 7) {
-                                channels[chl].chl_stat.clear();
-                            }
-                        } else if (cmd == 'G') {
+                        if (cmd == 'G') {
                             reset[chl] = false;
-                            channels[chl].setPortTone(true, cmdVal);
-                        } else if (cmd == 'E') {
-                            reset[chl] = false;
-                            channels[chl].setToneDownSild(true, cmdVal);
-                            // printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
-                        } else if (cmd == 'F') {
-                            reset[chl] = false;
-                            channels[chl].setToneUpSild(true, cmdVal);
-                            // printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
-                        } else if (cmd == 'O') {
-                            sampOfst[chl] = cmdVal;
-                            if (!channels[chl].chl_stat.empty())
-                                channels[chl].chl_stat.back().int_index = cmdVal;
-                        } else {
-                            // printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVal);
+                            channels[chl].setPortTone(true, cmdVar);
                         }
                     }
                     if (GET_NOTE(mask)) {
-                        uint8_t noteTmp = unpack_data[tracker_pats][chl][tracker_rows].note;
                         if (noteTmp < 120) {
                             if (channels[chl].tonePort) {
                                 channels[chl].setPortSource(channels[chl].chl_note);
-                                channels[chl].chl_note = noteTmp;
+                                channels[chl].changeNote(noteTmp);
                                 channels[chl].setPortTarget(channels[chl].chl_note);
                                 /*
                                 char st[4];
@@ -303,7 +309,7 @@ void playTask(void *arg) {
                                 printf("INFO: G%02X SOURCE=%s TARGET=%s\n", channels[chl].tonePortSpeed, st, tt);
                                 */
                             } else {
-                                channels[chl].chl_note = noteTmp;
+                                channels[chl].changeNote(noteTmp);
                             }
                             // printf("NOTE RESET = %d\n", reset);
                             // printf("CHL%02d ROW%03d: NOTE ON NOTE=%2d INST=%2d\n", chl, tracker_rows, channels[chl].chl_note, channels[chl].chl_inst);
@@ -317,11 +323,63 @@ void playTask(void *arg) {
                             channels[chl].fadeNote();
                         }
                     }
+                    if (GET_COMMAND(mask)) {
+                        if (cmd == 'A') {
+                            // 设定Ticks/Row
+                            TicksRow = cmdVar;
+                        } else if (cmd == 'B') {
+                            jumpToPat(cmdVar);
+                        } else if (cmd == 'C') {
+                            skipNextPat(cmdVar);
+                        } else if (cmd == 'M') {
+                            // 设定通道音量
+                            channels[chl].setChanVol(cmdVar);
+                        } else if (cmd == 'V') {
+                            // 设定全局音量
+                            GlobalVol = cmdVar;
+                        } else if (cmd == 'D') {
+                            // 音量滑动
+                            channels[chl].setVolSild(true, cmdVar);
+                        } else if (cmd == 'S') {
+                            switch (hexToDecimalTens(cmdVar)) {
+                            case 0x7:
+                                channels[chl].chl_stat.clear();
+                                break;
+
+                            case 0x8:
+                                channels[chl].chl_stat.back().note_pan = hexToDecimalOnes(cmdVar) - 7;
+                                break;
+                            
+                            case 0xC:
+                                channels[chl].setCutTick(hexToDecimalOnes(cmdVar));
+                                break;
+                            }
+                        } else if (cmd == 'G') {
+                            // ...
+                        } else if (cmd == 'E') {
+                            reset[chl] = false;
+                            channels[chl].setToneDownSild(true, cmdVar);
+                            // printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
+                        } else if (cmd == 'F') {
+                            reset[chl] = false;
+                            channels[chl].setToneUpSild(true, cmdVar);
+                            // printf("ROW%d CHL%d TONEUP: %d\n", tracker_rows, chl, channels[chl].toneUpSildVar);
+                        } else if (cmd == 'O') {
+                            sampOfst[chl] = cmdVar;
+                            if (!channels[chl].chl_stat.empty())
+                                channels[chl].chl_stat.back().int_index = cmdVar;
+                        } else if (cmd == 'X') {
+                            if (!channels[chl].chl_stat.empty())
+                                channels[chl].chl_stat.back().note_pan = cmdVar - 127;
+                        } else {
+                            printf("CHL%d->UNKNOW CMD: %c%02X\n", chl, cmd, cmdVar);
+                        }
+                    }
                     if (GET_INSTRUMENT(mask)) {
-                        channels[chl].startNote(unpack_data[tracker_pats][chl][tracker_rows].instrument, reset[chl], sampOfst[chl]);
+                        channels[chl].startNote(instTmp, reset[chl], sampOfst[chl]);
                     }
                     if (GET_VOLUME(mask)) {
-                        channels[chl].setVolVal(unpack_data[tracker_pats][chl][tracker_rows].volume);
+                        channels[chl].setVolVal(volFlg, volVar);
                     }
                 }
                 //printf("%02d %03d: ", tracker_pats, tracker_rows);
@@ -331,16 +389,7 @@ void playTask(void *arg) {
                 //printf("\n");
                 tracker_rows++;
                 if (tracker_rows >= maxRowTable[tracker_pats]) {
-                    tracker_rows = 0;
-                    tracker_ords++;
-                    while (it_header.Orders[tracker_ords] == 254) {
-                        tracker_ords++;
-                    }
-                    if (it_header.Orders[tracker_ords] == 255)
-                        tracker_ords = 0;
-
-                    tracker_pats = it_header.Orders[tracker_ords];
-                    printf("skip to %d -> %d\n", tracker_ords, tracker_pats);
+                    skipNextPat(0);
                 }
             }
             for (uint8_t chl = 0; chl < maxChannel; chl++) {
@@ -509,7 +558,8 @@ void mainTask(void *arg) {
     // Open File
     // FILE *file = fopen("/spiffs/laamaa_-_bluesy.it", "rb");
     // FILE *file = fopen("/spiffs/laamaa_-_wb22-wk21.it", "rb");
-    FILE *file = fopen("/spiffs/atlantishighway.it", "rb");
+    // FILE *file = fopen("/spiffs/atlantishighway.it", "rb");
+    FILE *file = fopen("/spiffs/fod_absolutezerob.it", "rb");
 
     // Read Header
     display.clearDisplay();

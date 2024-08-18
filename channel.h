@@ -20,7 +20,7 @@ typedef struct {
     new_note_activ_t nna;
     uint8_t note;
     int8_t note_vol;
-    uint8_t note_pan;
+    int16_t note_pan;
     uint8_t note_inst;
     uint8_t note_samp;
     uint8_t note_efct0;
@@ -39,22 +39,29 @@ typedef struct {
     uint16_t pit_env_tick;
 } chl_stat_t;
 
-inline void applyPan(int32_t *left, int32_t *right, uint16_t pan) {
+inline void applyPan(int32_t *left, int32_t *right, int16_t pan) {
     int32_t temp_left = *left;
     int32_t temp_right = *right;
-    
-    if (pan < 32) {
-        *right = (int16_t)((temp_right * pan) >> 5);
-    } else if (pan > 32) {
-        *left = (int16_t)((temp_left * (64 - pan)) >> 5);
+
+    if (pan < 0) {
+        // 将pan的范围从-128~0映射到64~0，0表示完全左声道
+        *right = (int32_t)((temp_right * (128 + pan)) >> 7);
+    } else if (pan > 0) {
+        // 将pan的范围从0~128映射到0~64，0表示完全右声道
+        *left = (int32_t)((temp_left * (128 - pan)) >> 7);
     }
+    // pan == 0时，不做任何处理，保持原样
 }
+
+const uint8_t volCmdPortToneToRelPortToneLUT[10] = {0x00, 0x01, 0x04, 0x08, 0x10, 0x20, 0x40, 0x60, 0x80, 0xff};
 
 class Channel {
 public:
+    uint8_t num;
+
     std::vector<chl_stat_t> chl_stat;
     uint8_t ChannelVol;
-    uint8_t ChannelPan;
+    int8_t ChannelPan;
     uint8_t FV_SHOW;
     uint8_t chl_inst;
     uint8_t chl_note;
@@ -64,6 +71,7 @@ public:
     uint8_t volSildDownVar = 0;
 
     bool tonePort = false;
+
     uint32_t tonePortSetStat = 0;
     uint32_t sourceFreq = 0;
     uint8_t tonePortSource = 0;
@@ -78,6 +86,9 @@ public:
     bool toneDownSild = false;
     uint8_t toneDownSildVar = 0;
     // chl_stat.pop_back();
+
+    bool delayCut = false;
+    uint8_t noteCutTick = 0;
 
     audio_stereo_32_t make_sound() {
         audio_stereo_32_t result_sum = {0, 0};
@@ -146,7 +157,7 @@ public:
             FV_SHOW = FV >> 4;
 
             // printf("GlobalVol: %d, note_stat: %d, ChannelVol: %d, vol: %d, instVol: %d, noteFadeComp %d, sampleVol: %d, FV: %d\n", GlobalVol, note_stat[chl], ChannelVol[chl], vol, instVol, noteFadeComp, it_samples[smp_num].Gvl, FV);
-            applyPan(&result.l, &result.r, ((uint16_t)ChannelPan + (uint16_t)chl_stat[i].note_pan) >> 1);
+            applyPan(&result.l, &result.r, chl_stat[i].note_pan);
             result.l *= FV;
             result.r *= FV;
 
@@ -225,7 +236,11 @@ public:
     }
 
     void changeNote(uint8_t note) {
-
+        chl_note = note;
+        if (!chl_stat.empty()) {
+            chl_stat.back().note = note;
+            chl_stat.back().note_freq = it_samples[chl_stat.back().note_samp].speedTable[note];
+        }
     }
 
     /*
@@ -306,23 +321,28 @@ public:
         }
     }
 
-    void setVolVal(uint8_t volVal) {
+    void setVolVal(char flg, uint8_t var) {
         if (chl_stat.empty()) {
             printf("WARNING: SET A EMPTY CHL\n");
         } else {
-            char flg;
-            uint8_t val;
-            volCmdToRel(volVal, &flg, &val);
             if (flg == 'v') {
-                chl_stat.back().note_vol = val;
+                chl_stat.back().note_vol = var;
             } else if (flg == 'p') {
-                chl_stat.back().note_pan = val;
+                chl_stat.back().note_pan = var - 32;
             } else if (flg == 'c') {
                 enbVolSild = true;
-                volSildUpVar = val;
+                volSildUpVar = var;
             } else if (flg == 'd') {
                 enbVolSild = true;
-                volSildDownVar = val;
+                volSildDownVar = var;
+            } else if (flg == 'a') {
+                volSildUp(var);
+            } else if (flg == 'b') {
+                volSildDown(var);
+            } else if (flg == 'g') {
+                // ...
+            } else {
+                printf("CHL%d->UNKNOW VOLCMD: %c%02d\n", num, flg, var);
             }
         }
     }
@@ -339,28 +359,60 @@ public:
 
     void setPortSource(uint8_t note) {
         tonePortSource = note;
-        tonePortSetStat = chl_stat.back().note_freq;
+        if (!chl_stat.empty())
+            tonePortSetStat = chl_stat.back().note_freq;
     }
 
     void setToneUpSild(bool stat, uint8_t var) {
         toneUpSild = stat;
-        if (var)
+        if (var) {
             toneUpSildVar = var;
+        }
+        /*
+        if (stat) {
+            if (toneUpSildVar > 239) {
+                if (!chl_stat.empty()) {
+                    printf("FINE VOL UP: %d -> ", chl_stat.back().note_freq);
+                    chl_stat.back().note_freq *= powf(2, (toneUpSildVar - 240) / 192.0f);
+                    printf("%d\n", chl_stat.back().note_freq);
+                }
+                toneUpSild = false;
+            }
+        }
+        */
     }
 
     void setToneDownSild(bool stat, uint8_t var) {
         toneDownSild = stat;
-        if (var)
+        if (var) {
             toneDownSildVar = var;
+        }
+        /*
+        if (stat) {
+            if (toneDownSildVar > 239) {
+                if (!chl_stat.empty()) {
+                    printf("FINE VOL DOWN: %d -> ", chl_stat.back().note_freq);
+                    chl_stat.back().note_freq *= powf(2, -(toneUpSildVar - 240) / 192.0f);
+                    printf("%d\n", chl_stat.back().note_freq);
+                }
+                toneDownSild = false;
+            }
+        }
+        */
     }
 
     void setPortTarget(uint8_t note) {
         tonePortTarget = note;
         if (tonePortTarget == tonePortSource && tonePortSetStat) {
-            printf("SET TARGET = SOURCE\n");
+            // printf("SET TARGET = SOURCE\n");
             sourceFreq = tonePortSetStat;
         }
         tonePortSetStat = 0;
+    }
+
+    void setCutTick(uint8_t tick) {
+        delayCut = true;
+        noteCutTick = tick;
     }
 
     void refrush_note(uint32_t Gtick) {
@@ -421,6 +473,15 @@ public:
         }
 
         // refrush Effect
+        if (delayCut) {
+            if (noteCutTick) {
+                noteCutTick--;
+            } else {
+                delayCut = false;
+                cutNote();
+            }
+        }
+
         if (Gtick) {
             if (enbVolSild) {
                 if (volSildDownVar) {
